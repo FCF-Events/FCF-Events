@@ -28,7 +28,7 @@ export async function createManagedUserAction(input: FormData) {
   }
 
   if (!isServiceRoleConfigured()) {
-    return { ok: true, message: "Demo mode: user details validated. Connect Supabase to persist users." };
+    return { ok: true, message: "User details validated. Connect Supabase to persist users." };
   }
 
   const values = parsed.data;
@@ -92,7 +92,7 @@ export async function updateManagedUserAction(input: FormData) {
   }
 
   if (!isServiceRoleConfigured()) {
-    return { ok: true, message: "Demo mode: user access validated. Connect Supabase to persist it." };
+    return { ok: true, message: "User access validated. Connect Supabase to persist it." };
   }
 
   const values = parsed.data;
@@ -164,7 +164,7 @@ export async function grantEventAccessAction(input: FormData) {
   }
 
   if (!isServiceRoleConfigured()) {
-    return { ok: true, message: "Demo mode: event access validated. Connect Supabase to persist it." };
+    return { ok: true, message: "Event access validated. Connect Supabase to persist it." };
   }
 
   const values = parsed.data;
@@ -208,7 +208,7 @@ export async function revokeEventAccessAction(input: FormData) {
   }
 
   if (!isServiceRoleConfigured()) {
-    return { ok: true, message: "Demo mode: event access removed locally." };
+    return { ok: true, message: "Event access removal validated. Connect Supabase to persist it." };
   }
 
   const supabase = createSupabaseAdminClient();

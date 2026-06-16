@@ -25,7 +25,7 @@ export async function saveTwilioSettings(input: FormData) {
   });
 
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid Twilio settings." };
-  if (!isServiceRoleConfigured()) return { ok: true, message: "Demo mode: settings validated. Connect Supabase to persist them." };
+  if (!isServiceRoleConfigured()) return { ok: true, message: "Settings validated. Connect Supabase to persist them." };
 
   const values = parsed.data;
   const supabase = createSupabaseAdminClient();
@@ -59,7 +59,7 @@ export async function saveTwilioSettings(input: FormData) {
 export async function sendTestSms(input: unknown) {
   const parsed = smsSendSchema.safeParse(input);
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid test SMS." };
-  if (!isServiceRoleConfigured()) return { ok: true, message: "Demo mode: SMS validated. Configure Supabase and Twilio to send." };
+  if (!isServiceRoleConfigured()) return { ok: true, message: "SMS validated. Configure Supabase and Twilio to send." };
 
   const values = parsed.data;
   const supabase = createSupabaseAdminClient();
@@ -99,4 +99,3 @@ export async function sendTestSms(input: unknown) {
   if (send.error) return { ok: false, message: send.error };
   return { ok: true, message: "Test SMS sent." };
 }
-

@@ -15,7 +15,7 @@ const messages: Record<string, string> = {
   profile: "Profile updated.",
   email: "Email update requested. You may need to confirm the new email address.",
   password: "Password updated.",
-  demo: "Demo mode: settings form validated.",
+  demo: "Settings form validated.",
 };
 
 const errors: Record<string, string> = {

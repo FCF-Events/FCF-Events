@@ -28,7 +28,7 @@ export async function createEventAction(input: FormData) {
   }
 
   if (!isServiceRoleConfigured()) {
-    return { ok: true, message: "Demo mode: event validated. Connect Supabase to persist it." };
+    return { ok: true, message: "Event validated. Connect Supabase to persist it." };
   }
 
   const values = parsed.data;
@@ -65,4 +65,3 @@ export async function createEventAction(input: FormData) {
   revalidatePath("/dashboard/events");
   return { ok: true, message: "Event created." };
 }
-

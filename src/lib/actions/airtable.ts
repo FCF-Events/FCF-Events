@@ -19,7 +19,7 @@ export async function saveAirtableSettings(input: FormData) {
   });
 
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid Airtable settings." };
-  if (!isServiceRoleConfigured()) return { ok: true, message: "Demo mode: Airtable settings validated." };
+  if (!isServiceRoleConfigured()) return { ok: true, message: "Airtable settings validated. Connect Supabase to save them." };
 
   const values = parsed.data;
   const supabase = createSupabaseAdminClient();
@@ -48,7 +48,7 @@ export async function saveAirtableSettings(input: FormData) {
 }
 
 export async function runAirtableSync(organizationId: string) {
-  if (!isServiceRoleConfigured()) return { ok: true, message: "Demo mode: sync simulated." };
+  if (!isServiceRoleConfigured()) return { ok: true, message: "Sync request validated. Connect Supabase to record sync logs." };
   const supabase = createSupabaseAdminClient();
   await supabase.from("airtable_sync_logs").insert({
     organization_id: organizationId,
@@ -58,4 +58,3 @@ export async function runAirtableSync(organizationId: string) {
   });
   return { ok: true, message: "Sync log created. Complete mappings before production sync." };
 }
-

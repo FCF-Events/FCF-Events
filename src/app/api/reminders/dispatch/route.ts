@@ -4,7 +4,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export async function POST() {
   if (!isServiceRoleConfigured()) {
-    return NextResponse.json({ ok: true, message: "Demo mode: reminder dispatch simulated.", sent: 0 });
+    return NextResponse.json({ ok: true, message: "Reminder dispatch simulated.", sent: 0 });
   }
 
   const supabase = createSupabaseAdminClient();
@@ -28,4 +28,3 @@ export async function POST() {
 
   return NextResponse.json({ ok: true, queued });
 }
-
