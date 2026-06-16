@@ -1,31 +1,156 @@
+import { Save } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { SelectField } from "@/components/ui/select-field";
+import { Textarea } from "@/components/ui/textarea";
+import { updateSessionAction } from "@/lib/actions/sessions";
 import { getEvents, getSessions } from "@/lib/data";
+import { toDateTimeLocalInputValue } from "@/lib/utils";
+
+const statusOptions = [
+  { label: "Draft", value: "draft" },
+  { label: "Published", value: "published" },
+  { label: "Cancelled", value: "cancelled" },
+  { label: "Past", value: "past" },
+];
+
+const sessionTypeOptions = [
+  { label: "Seminar", value: "seminar" },
+  { label: "Panel", value: "panel" },
+  { label: "Keynote", value: "keynote" },
+  { label: "Workshop", value: "workshop" },
+  { label: "Networking", value: "networking" },
+  { label: "VIP", value: "vip" },
+  { label: "Press", value: "press" },
+  { label: "Sponsor", value: "sponsor" },
+];
 
 export default async function SessionsPage() {
   const [events, sessions] = await Promise.all([getEvents(), getSessions()]);
+  const eventOptions = events.map((event) => ({ label: event.title, value: event.id }));
+  const eventTitleById = new Map(events.map((event) => [event.id, event.title]));
+
+  async function updateSession(formData: FormData) {
+    "use server";
+    await updateSessionAction(formData);
+  }
 
   return (
     <>
-      <PageHeader eyebrow="Agenda" title="Sessions" description="Concurrent seminars, panels, workshops, and networking blocks across events." />
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {sessions.map((session) => {
-          const event = events.find((item) => item.id === session.event_id);
-          return (
-            <Card key={session.id}>
-              <CardContent className="p-5">
-                <Badge>{session.type}</Badge>
-                <h2 className="mt-4 text-lg font-semibold text-white">{session.title}</h2>
-                <p className="mt-2 text-sm text-[#999999]">{event?.title}</p>
-                <p className="mt-3 text-sm text-[#dddddd]">{new Date(session.starts_at).toLocaleString()} · {session.room}</p>
-                <p className="mt-2 text-sm text-[#999999]">Capacity: {session.capacity ?? "Unlimited"}</p>
+      <PageHeader eyebrow="Agenda" title="Sessions" description="Edit seminars, panels, workshops, and networking blocks across events." />
+      {sessions.length ? (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {sessions.map((session) => (
+            <Card key={session.id} id={`session-${session.id}`} className="scroll-mt-6">
+              <CardHeader>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <CardTitle>{session.title}</CardTitle>
+                    <p className="mt-2 text-sm text-[#999999]">{eventTitleById.get(session.event_id) ?? "Unknown event"}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant={session.status === "published" ? "success" : "muted"}>{session.status}</Badge>
+                    <Badge variant="muted">{session.type}</Badge>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <form action={updateSession} className="space-y-4">
+                  <input type="hidden" name="sessionId" value={session.id} />
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label="Title">
+                      <Input name="title" defaultValue={session.title} required />
+                    </Field>
+                    <Field label="Slug">
+                      <Input name="slug" defaultValue={session.slug} required />
+                    </Field>
+                    <Field label="Event">
+                      <SelectField name="eventId" defaultValue={session.event_id} options={eventOptions} />
+                    </Field>
+                    <Field label="Room">
+                      <Input name="room" defaultValue={session.room ?? ""} />
+                    </Field>
+                    <Field label="Starts">
+                      <Input name="startsAt" type="datetime-local" defaultValue={toDateTimeLocalInputValue(session.starts_at)} required />
+                    </Field>
+                    <Field label="Ends">
+                      <Input name="endsAt" type="datetime-local" defaultValue={toDateTimeLocalInputValue(session.ends_at)} required />
+                    </Field>
+                    <Field label="Capacity">
+                      <Input name="capacity" type="number" min={1} defaultValue={session.capacity ?? ""} />
+                    </Field>
+                    <Field label="Type">
+                      <SelectField name="type" defaultValue={session.type} options={sessionTypeOptions} />
+                    </Field>
+                    <Field label="Status">
+                      <SelectField name="status" defaultValue={session.status} options={statusOptions} />
+                    </Field>
+                  </div>
+                  <Field label="Description">
+                    <Textarea name="description" defaultValue={session.description} />
+                  </Field>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <CheckboxField
+                      label="Requires registration"
+                      name="requiresRegistration"
+                      defaultChecked={session.requires_registration}
+                    />
+                    <CheckboxField
+                      label="Separate check-in"
+                      name="requiresSeparateCheckIn"
+                      defaultChecked={session.requires_separate_check_in}
+                    />
+                    <CheckboxField label="Waitlist enabled" name="waitlistEnabled" defaultChecked={session.waitlist_enabled} />
+                  </div>
+                  <Button type="submit">
+                    <Save className="h-4 w-4" aria-hidden />
+                    Save Session
+                  </Button>
+                </form>
               </CardContent>
             </Card>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <Card>
+          <CardContent className="p-5 text-sm text-[#999999]">No sessions have been created yet.</CardContent>
+        </Card>
+      )}
     </>
   );
 }
 
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+function CheckboxField({
+  label,
+  name,
+  defaultChecked,
+}: {
+  label: string;
+  name: string;
+  defaultChecked: boolean;
+}) {
+  return (
+    <label className="flex min-h-10 items-center gap-3 rounded-md border border-white/10 bg-[#0b0b0b] px-3 py-2 text-sm text-[#dddddd]">
+      <input
+        type="checkbox"
+        name={name}
+        defaultChecked={defaultChecked}
+        className="h-4 w-4 rounded border-white/20 bg-[#111111] accent-[#e50913]"
+      />
+      <span>{label}</span>
+    </label>
+  );
+}
