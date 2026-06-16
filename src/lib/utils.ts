@@ -25,3 +25,16 @@ export function segmentCount(message: string) {
   return Math.max(1, Math.ceil(message.length / 153));
 }
 
+export function eventLocationLabel(venueName: string | null | undefined, address: string | null | undefined) {
+  return [venueName, address]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))
+    .join(", ");
+}
+
+export function googleMapsSearchUrl(query: string | null | undefined) {
+  const normalizedQuery = query?.trim().replace(/\s+/g, " ");
+  if (!normalizedQuery) return null;
+
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(normalizedQuery)}`;
+}

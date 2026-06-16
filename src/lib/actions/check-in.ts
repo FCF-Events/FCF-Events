@@ -6,7 +6,7 @@ import { demoEvents } from "@/lib/demo-data";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { checkInSchema } from "@/lib/validation";
-import type { CheckInResult } from "@/lib/types";
+import type { CheckInResult, Role } from "@/lib/types";
 
 const demoCheckedInCodes = new Set<string>();
 
@@ -61,6 +61,40 @@ export async function runCheckIn(input: unknown): Promise<CheckInResult> {
   }
 
   if (ticketError || !ticket) return { result: "invalid" };
+
+  if (userId) {
+    const { data: membership } = await supabase
+      .from("organization_members")
+      .select("role, is_active")
+      .eq("organization_id", ticket.organization_id)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const role = membership?.is_active ? (membership.role as Role) : null;
+    const canAccessAllEvents = role === "owner" || role === "admin" || role === "manager";
+
+    if (!canAccessAllEvents) {
+      const { data: assignment } = await supabase
+        .from("event_staff_assignments")
+        .select("role")
+        .eq("organization_id", ticket.organization_id)
+        .eq("event_id", values.eventId)
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      const assignedRole = assignment?.role as Role | undefined;
+      const canUseAssignedEvent =
+        assignedRole === "owner" ||
+        assignedRole === "admin" ||
+        assignedRole === "manager" ||
+        assignedRole === "check_in_staff";
+
+      if (!canUseAssignedEvent) {
+        await logAttempt("not_authorized", ticket.id, ticket.organization_id);
+        return { result: "not_authorized" };
+      }
+    }
+  }
 
   if (ticket.event_id !== values.eventId) {
     await logAttempt("wrong_event", ticket.id, ticket.organization_id);

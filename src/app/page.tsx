@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { ArrowRight, CalendarDays, Clock, LogIn, MapPin, Ticket } from "lucide-react";
+import { CalendarDays, Clock, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getEvents } from "@/lib/data";
 import { Badge } from "@/components/ui/badge";
+import { PublicFooter } from "@/components/public-footer";
+import { PublicHeader } from "@/components/public-header";
 
 export default async function Home() {
   const events = await getEvents();
@@ -14,33 +16,7 @@ export default async function Home() {
 
   return (
     <main className="min-h-screen bg-[#0b0b0b] text-white">
-      <header className="sticky top-0 z-20 border-b border-white/10 bg-[#0b0b0b]/92 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 md:px-8">
-          <Link href="/" className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-md bg-[#b20711]">
-              <Ticket className="h-5 w-5" aria-hidden />
-            </span>
-            <span>
-              <span className="block text-sm font-semibold">FCF Events</span>
-              <span className="block text-xs text-[#999999]">Cannabis industry events</span>
-            </span>
-          </Link>
-          <nav className="flex items-center gap-2">
-            <Button asChild variant="ghost" className="hidden sm:inline-flex">
-              <Link href="/login">
-                <LogIn className="h-4 w-4" aria-hidden />
-                Log in
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link href={signupHref}>
-                Sign up
-                <ArrowRight className="h-4 w-4" aria-hidden />
-              </Link>
-            </Button>
-          </nav>
-        </div>
-      </header>
+      <PublicHeader signupHref={signupHref} />
 
       <section id="events" className="mx-auto max-w-7xl px-4 py-10 md:px-8 md:py-14">
         <div className="grid gap-8 lg:grid-cols-[0.65fr_1fr]">
@@ -127,6 +103,7 @@ export default async function Home() {
           </div>
         </div>
       </section>
+      <PublicFooter />
     </main>
   );
 }

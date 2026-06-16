@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { getEventBySlug, getSessions, getTicketTypes } from "@/lib/data";
-import { currency } from "@/lib/utils";
+import { currency, eventLocationLabel, googleMapsSearchUrl } from "@/lib/utils";
 
 export default async function EventDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -14,6 +14,8 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
   if (!event) notFound();
 
   const [sessions, ticketTypes] = await Promise.all([getSessions(event.id), getTicketTypes(event.id)]);
+  const locationLabel = eventLocationLabel(event.venue_name, event.address);
+  const mapsHref = event.address?.trim() ? googleMapsSearchUrl(locationLabel) : null;
 
   return (
     <>
@@ -40,7 +42,24 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
             <Info label="Visibility" value={event.visibility} />
             <Info label="Start" value={new Date(event.starts_at).toLocaleString()} />
             <Info label="End" value={new Date(event.ends_at).toLocaleString()} />
-            <Info label="Venue" value={event.venue_name ?? "No venue"} />
+            <Info
+              label="Venue"
+              value={
+                mapsHref ? (
+                  <a
+                    href={mapsHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-white underline-offset-4 transition hover:text-[#ff6b6f] hover:underline"
+                  >
+                    {locationLabel}
+                    <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  </a>
+                ) : (
+                  locationLabel || "No venue"
+                )
+              }
+            />
             <Info label="Capacity" value={event.capacity ?? "Unlimited"} />
             <Info label="Minimum age" value={`${event.minimum_age}+`} />
             <Info label="Compliance" value={event.compliance_notes ?? "No notes"} />
@@ -88,4 +107,3 @@ function Info({ label, value }: { label: string; value: React.ReactNode }) {
     </div>
   );
 }
-
