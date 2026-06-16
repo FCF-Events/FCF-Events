@@ -713,6 +713,7 @@ function AttendeeCheckInList({
                           type="button"
                           size="sm"
                           variant={attendee.checked_in_at ? "outline" : "default"}
+                          className="min-w-[96px] whitespace-nowrap"
                           disabled={!attendee.ticket_code || isCheckingIn}
                           onClick={() => {
                             if (attendee.ticket_code) onCheckIn(attendee.ticket_code);
