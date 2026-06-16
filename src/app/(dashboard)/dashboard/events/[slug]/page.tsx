@@ -144,6 +144,88 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
           </CardContent>
         </Card>
       </div>
+      <Card id="edit-event" className="mt-4 scroll-mt-6">
+        <CardHeader>
+          <CardTitle>Edit Event</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form action={updateEvent} className="space-y-4">
+            <input type="hidden" name="eventId" value={event.id} />
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="Title">
+                <Input name="title" defaultValue={event.title} required />
+              </Field>
+              <Field label="Slug">
+                <Input name="slug" defaultValue={event.slug} required />
+              </Field>
+              <Field label="Starts">
+                <Input name="startsAt" type="datetime-local" defaultValue={toDateTimeLocalInputValue(event.starts_at)} required />
+              </Field>
+              <Field label="Ends">
+                <Input name="endsAt" type="datetime-local" defaultValue={toDateTimeLocalInputValue(event.ends_at)} required />
+              </Field>
+              <Field label="Venue">
+                <Input name="venueName" defaultValue={event.venue_name ?? ""} />
+              </Field>
+              <Field label="Room">
+                <Input name="room" defaultValue={event.room ?? ""} />
+              </Field>
+              <Field label="Capacity">
+                <Input name="capacity" type="number" min={1} defaultValue={event.capacity ?? ""} />
+              </Field>
+              <Field label="Minimum age">
+                <Input name="minimumAge" type="number" min={18} defaultValue={event.minimum_age} />
+              </Field>
+            </div>
+            <Field label="Address">
+              <Input name="address" defaultValue={event.address ?? ""} />
+            </Field>
+            <Field label="Description">
+              <Textarea name="description" defaultValue={event.description} />
+            </Field>
+            <Field label="Compliance notes">
+              <Textarea name="complianceNotes" defaultValue={event.compliance_notes ?? ""} />
+            </Field>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="Zeffy campaign ID">
+                <Input name="zeffyCampaignId" defaultValue={event.zeffy_campaign_id ?? ""} />
+              </Field>
+              <Field label="Zeffy form URL">
+                <Input name="zeffyFormUrl" type="url" defaultValue={event.zeffy_form_url ?? ""} placeholder="https://www.zeffy.com/..." />
+              </Field>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="Status">
+                <SelectField
+                  name="status"
+                  defaultValue={event.status}
+                  options={[
+                    { label: "Draft", value: "draft" },
+                    { label: "Published", value: "published" },
+                    { label: "Cancelled", value: "cancelled" },
+                    { label: "Past", value: "past" },
+                  ]}
+                />
+              </Field>
+              <Field label="Visibility">
+                <SelectField
+                  name="visibility"
+                  defaultValue={event.visibility}
+                  options={[
+                    { label: "Private", value: "private" },
+                    { label: "Public", value: "public" },
+                    { label: "Unlisted", value: "unlisted" },
+                  ]}
+                />
+              </Field>
+            </div>
+            <Button type="submit">
+              <Save className="h-4 w-4" aria-hidden />
+              Save Event
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
       <Card id="attendees" className="mt-4 scroll-mt-6">
         <CardHeader>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -224,7 +306,10 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
             <Field label="Form URL">
               <Input name="zeffyFormUrl" type="url" defaultValue={event.zeffy_form_url ?? ""} placeholder="https://www.zeffy.com/..." />
             </Field>
-            <Button type="submit">Save Zeffy</Button>
+            <Button type="submit">
+              <Save className="h-4 w-4" aria-hidden />
+              Save Zeffy
+            </Button>
           </form>
         </CardContent>
       </Card>
@@ -235,7 +320,15 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
         <CardContent className="grid gap-3 md:grid-cols-2">
           {sessions.map((session) => (
             <div key={session.id} className="rounded-md border border-white/10 p-4">
-              <p className="font-medium text-white">{session.title}</p>
+              <div className="flex items-start justify-between gap-3">
+                <p className="font-medium text-white">{session.title}</p>
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`/dashboard/sessions#session-${session.id}`}>
+                    <Pencil className="h-4 w-4" aria-hidden />
+                    Edit
+                  </Link>
+                </Button>
+              </div>
               <p className="mt-1 text-sm text-[#999999]">{new Date(session.starts_at).toLocaleTimeString()} · {session.room}</p>
             </div>
           ))}

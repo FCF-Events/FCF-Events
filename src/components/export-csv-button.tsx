@@ -49,8 +49,11 @@ export function ExportCsvButton({
 
     link.href = objectUrl;
     link.download = filename;
+    link.style.display = "none";
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(objectUrl);
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
   }
 
   return (
