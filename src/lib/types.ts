@@ -24,15 +24,20 @@ export type EventSummary = {
 
 export type SessionSummary = {
   id: string;
+  organization_id: string;
   event_id: string;
   title: string;
   slug: string;
+  description: string;
   starts_at: string;
   ends_at: string;
   room: string | null;
   capacity: number | null;
+  status: EventSummary["status"];
   type: string;
+  requires_separate_check_in: boolean;
   requires_registration: boolean;
+  waitlist_enabled: boolean;
 };
 
 export type TicketTypeSummary = {
@@ -120,12 +125,16 @@ export type AttendeeEventTicket = {
   event_starts_at: string;
   event_ends_at: string;
   event_timezone: string;
+  event_status: EventSummary["status"];
   venue_name: string | null;
+  ticket_type_id: string | null;
   ticket_type_name: string | null;
   ticket_id: string | null;
   ticket_code: string | null;
   ticket_status: TicketSummary["status"] | null;
   issued_at: string | null;
+  checked_in_at: string | null;
+  session_check_in_count: number;
   sessions: TicketDetailSession[];
 };
 

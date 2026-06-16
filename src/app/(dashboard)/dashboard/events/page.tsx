@@ -37,7 +37,7 @@ export default async function EventsPage() {
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>
                     <p className="font-medium text-white">{event.title}</p>
-                    <p className="mt-1 text-sm text-[#999999]">{new Date(event.starts_at).toLocaleString()} · {event.venue_name}</p>
+                    <p className="mt-1 text-sm text-[#999999]">{new Date(event.starts_at).toLocaleString()} - {event.venue_name}</p>
                   </div>
                   <div className="flex gap-2">
                     <Badge variant={event.status === "published" ? "success" : "muted"}>{event.status}</Badge>
@@ -66,6 +66,7 @@ export default async function EventsPage() {
               </div>
               <Field label="Address"><Input name="address" /></Field>
               <Field label="Description"><Textarea name="description" /></Field>
+              <Field label="Compliance notes"><Textarea name="complianceNotes" /></Field>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label="Zeffy campaign ID"><Input name="zeffyCampaignId" placeholder="Optional after Zeffy form is created" /></Field>
                 <Field label="Zeffy form URL"><Input name="zeffyFormUrl" type="url" placeholder="https://www.zeffy.com/..." /></Field>

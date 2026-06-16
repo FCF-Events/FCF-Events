@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CalendarDays, Clock, MapPin, ShieldCheck, Ticket, UserRound } from "lucide-react";
+import { AddToCalendarButton } from "@/components/add-to-calendar-button";
 import { PrintTicketButton } from "@/components/print-ticket-button";
 import { SendTicketEmailForm } from "@/components/send-ticket-email-form";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +38,15 @@ export default async function TicketPage({ params }: { params: Promise<{ ticketC
           </Button>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
             <PrintTicketButton />
+            <AddToCalendarButton
+              title={ticket.event_title}
+              startsAt={ticket.event_starts_at}
+              endsAt={ticket.event_ends_at}
+              location={locationLabel}
+              description={`${ticket.event_description}\n\nTicket code: ${ticket.ticket_code}`}
+              url={url}
+              fileName={`${ticket.event_slug}-ticket.ics`}
+            />
             <SendTicketEmailForm ticketCode={decoded} defaultEmail={ticket.attendee_email} />
           </div>
         </div>

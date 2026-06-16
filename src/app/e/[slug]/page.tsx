@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { CalendarDays, ExternalLink, MapPin, ShieldCheck, Ticket } from "lucide-react";
+import { AddToCalendarButton } from "@/components/add-to-calendar-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RegistrationForm } from "@/components/registration-form";
@@ -26,6 +27,16 @@ export default async function PublicEventPage({ params }: { params: Promise<{ sl
             <Badge className="mb-4">FCF Events</Badge>
             <h1 className="text-4xl font-semibold leading-tight md:text-6xl">{event.title}</h1>
             <p className="mt-5 max-w-3xl text-base leading-7 text-[#dddddd]">{event.description}</p>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <AddToCalendarButton
+                title={event.title}
+                startsAt={event.starts_at}
+                endsAt={event.ends_at}
+                location={locationLabel}
+                description={event.description}
+                fileName={`${event.slug}.ics`}
+              />
+            </div>
             <div className="mt-8 grid gap-3 md:grid-cols-2">
               <Info icon={CalendarDays} label="Date" value={new Date(event.starts_at).toLocaleString()} />
               <Info icon={MapPin} label="Venue" value={locationLabel} href={mapsHref} />

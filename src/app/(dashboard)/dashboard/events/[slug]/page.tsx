@@ -1,15 +1,17 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { ExternalLink, Users } from "lucide-react";
+import { notFound, redirect } from "next/navigation";
+import { ExternalLink, Pencil, Save, Users } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { updateEventZeffySettingsAction } from "@/lib/actions/events";
+import { SelectField } from "@/components/ui/select-field";
+import { Textarea } from "@/components/ui/textarea";
+import { updateEventAction, updateEventZeffySettingsAction } from "@/lib/actions/events";
 import { getEventAttendees, getEventBySlug, getSessions, getTicketTypes } from "@/lib/data";
-import { currency, eventLocationLabel, googleMapsSearchUrl } from "@/lib/utils";
+import { currency, eventLocationLabel, googleMapsSearchUrl, toDateTimeLocalInputValue } from "@/lib/utils";
 
 export default async function EventDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -24,6 +26,21 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
   const locationLabel = eventLocationLabel(event.venue_name, event.address);
   const mapsHref = event.address?.trim() ? googleMapsSearchUrl(locationLabel) : null;
 
+  async function updateEvent(formData: FormData) {
+    "use server";
+    const result = await updateEventAction(formData);
+    if (
+      result.ok &&
+      "persisted" in result &&
+      result.persisted &&
+      "slug" in result &&
+      typeof result.slug === "string" &&
+      result.slug !== slug
+    ) {
+      redirect(`/dashboard/events/${result.slug}`);
+    }
+  }
+
   async function updateZeffySettings(formData: FormData) {
     "use server";
     await updateEventZeffySettingsAction(formData);
@@ -37,6 +54,12 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
         description={event.description}
         action={
           <div className="flex flex-wrap gap-2">
+            <Button asChild variant="secondary">
+              <Link href={`/dashboard/events/${event.slug}#edit-event`}>
+                <Pencil className="h-4 w-4" aria-hidden />
+                Edit
+              </Link>
+            </Button>
             <Button asChild variant="secondary">
               <Link href={`/dashboard/events/${event.slug}#attendees`}>
                 <Users className="h-4 w-4" aria-hidden />

@@ -65,7 +65,50 @@ export const attendeeUpdateSchema = z.object({
   emailConsent: z.boolean().default(false),
 });
 
-export const eventSchema = z.object({
+export const registrationStatusSchema = z.enum(["pending", "confirmed", "cancelled", "waitlisted"]);
+export const paymentStatusSchema = z.enum([
+  "not_required",
+  "pending",
+  "paid",
+  "partially_paid",
+  "failed",
+  "refunded",
+  "comped",
+]);
+
+export const attendeeRegistrationUpdateSchema = z.object({
+  attendeeId: z.string().uuid(),
+  registrationId: z.string().uuid(),
+  eventId: z.string().uuid(),
+  ticketTypeId: z.string().uuid().optional().or(z.literal("")),
+  sessionIds: z.array(z.string().uuid()).default([]),
+  registrationStatus: registrationStatusSchema,
+  paymentStatus: paymentStatusSchema,
+});
+
+function validateDateRange(values: { startsAt: string; endsAt: string }, ctx: z.RefinementCtx) {
+  const startsAt = Date.parse(values.startsAt);
+  const endsAt = Date.parse(values.endsAt);
+
+  if (Number.isNaN(startsAt) || Number.isNaN(endsAt)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["startsAt"],
+      message: "Use valid start and end dates.",
+    });
+    return;
+  }
+
+  if (endsAt <= startsAt) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["endsAt"],
+      message: "End time must be after start time.",
+    });
+  }
+}
+
+const eventBaseSchema = z.object({
   title: z.string().min(2).max(160),
   slug: z
     .string()
@@ -78,6 +121,7 @@ export const eventSchema = z.object({
   address: z.string().max(240).optional(),
   room: z.string().max(120).optional(),
   description: z.string().max(5000).default(""),
+  complianceNotes: z.string().max(5000).optional().or(z.literal("")),
   capacity: z.coerce.number().int().positive().optional(),
   status: z.enum(["draft", "published", "cancelled", "past"]).default("draft"),
   visibility: z.enum(["private", "public", "unlisted"]).default("private"),
@@ -91,6 +135,45 @@ export const eventSchema = z.object({
     .optional()
     .or(z.literal("")),
 });
+
+export const eventSchema = eventBaseSchema.superRefine(validateDateRange);
+
+export const eventUpdateSchema = eventBaseSchema
+  .extend({
+  eventId: z.string().uuid(),
+  })
+  .superRefine(validateDateRange);
+
+export const sessionTypeSchema = z.enum(["seminar", "panel", "keynote", "workshop", "networking", "vip", "press", "sponsor"]);
+
+const sessionBaseSchema = z.object({
+  eventId: z.string().uuid(),
+  title: z.string().trim().min(2).max(160),
+  slug: z
+    .string()
+    .trim()
+    .min(2)
+    .max(120)
+    .regex(/^[a-z0-9-]+$/, "Use lowercase letters, numbers, and dashes"),
+  startsAt: z.string().min(1),
+  endsAt: z.string().min(1),
+  room: z.string().trim().max(120).optional().or(z.literal("")),
+  description: z.string().trim().max(5000).optional().or(z.literal("")),
+  capacity: z.coerce.number().int().positive().optional(),
+  status: z.enum(["draft", "published", "cancelled", "past"]).default("draft"),
+  type: sessionTypeSchema.default("seminar"),
+  requiresRegistration: z.boolean().default(false),
+  requiresSeparateCheckIn: z.boolean().default(true),
+  waitlistEnabled: z.boolean().default(false),
+});
+
+export const sessionSchema = sessionBaseSchema.superRefine(validateDateRange);
+
+export const sessionUpdateSchema = sessionBaseSchema
+  .extend({
+  sessionId: z.string().uuid(),
+  })
+  .superRefine(validateDateRange);
 
 export const zeffyEventSettingsSchema = z.object({
   eventId: z.string().uuid(),

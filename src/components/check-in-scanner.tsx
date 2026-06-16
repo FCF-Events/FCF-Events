@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, ReactNode, useCallback, useEffect, useId, useMemo, useState, useTransition } from "react";
-import { Camera, CheckCircle2, Keyboard, Mail, Phone, Search, TicketCheck, UserPlus, XCircle } from "lucide-react";
+import { FormEvent, ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
+import { Camera, CheckCircle2, Clock3, Keyboard, Mail, Phone, RefreshCw, Search, TicketCheck, UserPlus, XCircle } from "lucide-react";
 import { Html5Qrcode } from "html5-qrcode";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,7 @@ import type {
   CheckInLookupResponse,
   CheckInLookupResult,
   CheckInResult,
+  EventAttendeeSummary,
   EventSummary,
   SessionSummary,
   TicketTypeSummary,
@@ -34,6 +36,13 @@ type CheckInScannerProps = {
   events: EventSummary[];
   sessions: SessionSummary[];
   ticketTypes: TicketTypeSummary[];
+  initialAttendees: EventAttendeeSummary[];
+};
+
+type CheckInAttendeeListResponse = {
+  ok: boolean;
+  message?: string;
+  attendees: EventAttendeeSummary[];
 };
 
 const emptyWalkUpForm: WalkUpFormState = {
@@ -47,8 +56,9 @@ const emptyWalkUpForm: WalkUpFormState = {
   paymentMode: "cash",
 };
 
-export function CheckInScanner({ events, sessions, ticketTypes }: CheckInScannerProps) {
+export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees }: CheckInScannerProps) {
   const scannerId = useId().replaceAll(":", "");
+  const attendeeRequestId = useRef(0);
   const [eventId, setEventId] = useState(events[0]?.id ?? "");
   const [sessionId, setSessionId] = useState("");
   const [ticketCode, setTicketCode] = useState("");
@@ -56,6 +66,11 @@ export function CheckInScanner({ events, sessions, ticketTypes }: CheckInScanner
   const [lookupQuery, setLookupQuery] = useState("");
   const [lookupResults, setLookupResults] = useState<CheckInLookupResult[]>([]);
   const [lookupMessage, setLookupMessage] = useState<string | null>(null);
+  const [attendees, setAttendees] = useState<EventAttendeeSummary[]>(initialAttendees);
+  const [attendeeFilter, setAttendeeFilter] = useState<"all" | "checked_in" | "not_checked_in">("all");
+  const [attendeeListQuery, setAttendeeListQuery] = useState("");
+  const [attendeeListMessage, setAttendeeListMessage] = useState<string | null>(null);
+  const [isRefreshingAttendees, setIsRefreshingAttendees] = useState(false);
   const [result, setResult] = useState<CheckInResult | WalkUpCheckInResult | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [walkUp, setWalkUp] = useState<WalkUpFormState>(emptyWalkUpForm);
@@ -67,10 +82,79 @@ export function CheckInScanner({ events, sessions, ticketTypes }: CheckInScanner
     () => sessions.filter((session) => session.event_id === eventId),
     [eventId, sessions],
   );
+  const activeSession = useMemo(
+    () => filteredSessions.find((session) => session.id === sessionId) ?? null,
+    [filteredSessions, sessionId],
+  );
   const filteredTicketTypes = useMemo(
     () => ticketTypes.filter((ticketType) => ticketType.event_id === eventId),
     [eventId, ticketTypes],
   );
+  const checkInScopeLabel = sessionId ? activeSession?.title ?? "Selected session" : "Event-level check-in";
+  const checkedInCount = useMemo(
+    () => attendees.filter((attendee) => Boolean(attendee.checked_in_at)).length,
+    [attendees],
+  );
+  const visibleAttendees = useMemo(() => {
+    const query = attendeeListQuery.trim().toLowerCase();
+
+    return attendees.filter((attendee) => {
+      const matchesStatus =
+        attendeeFilter === "all" ||
+        (attendeeFilter === "checked_in" && attendee.checked_in_at) ||
+        (attendeeFilter === "not_checked_in" && !attendee.checked_in_at);
+
+      if (!matchesStatus) return false;
+      if (!query) return true;
+
+      return [
+        attendee.full_name,
+        attendee.email,
+        attendee.phone,
+        attendee.company,
+        attendee.ticket_code,
+        attendee.ticket_type_name,
+      ]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(query));
+    });
+  }, [attendeeFilter, attendeeListQuery, attendees]);
+
+  const loadAttendees = useCallback(async (targetEventId: string, targetSessionId: string) => {
+    if (!targetEventId) {
+      setAttendees([]);
+      return;
+    }
+
+    const requestId = attendeeRequestId.current + 1;
+    attendeeRequestId.current = requestId;
+    setIsRefreshingAttendees(true);
+    setAttendeeListMessage(null);
+
+    try {
+      const response = await fetch("/api/check-in/attendees", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          eventId: targetEventId,
+          sessionId: targetSessionId || null,
+        }),
+      });
+      const data = (await response.json()) as CheckInAttendeeListResponse;
+      if (requestId !== attendeeRequestId.current) return;
+
+      setAttendees(data.attendees ?? []);
+      setAttendeeListMessage(data.message ?? (!response.ok ? "Could not load attendees." : null));
+    } catch {
+      if (requestId !== attendeeRequestId.current) return;
+      setAttendees([]);
+      setAttendeeListMessage("Could not load attendees.");
+    } finally {
+      if (requestId === attendeeRequestId.current) {
+        setIsRefreshingAttendees(false);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (sessionId && !filteredSessions.some((session) => session.id === sessionId)) {
@@ -87,6 +171,10 @@ export function CheckInScanner({ events, sessions, ticketTypes }: CheckInScanner
       };
     });
   }, [filteredTicketTypes]);
+
+  useEffect(() => {
+    void loadAttendees(eventId, sessionId);
+  }, [eventId, loadAttendees, sessionId]);
 
   const submitTicket = useCallback(
     (rawCode: string) => {
@@ -106,12 +194,15 @@ export function CheckInScanner({ events, sessions, ticketTypes }: CheckInScanner
         });
         const data = (await response.json()) as CheckInResult;
         setResult(data);
+        if (data.result === "success") {
+          await loadAttendees(eventId, sessionId);
+        }
         if (!response.ok) {
           setStatusMessage(resultMessage(data.result));
         }
       });
     },
-    [eventId, sessionId],
+    [eventId, loadAttendees, sessionId],
   );
 
   useEffect(() => {
@@ -205,6 +296,7 @@ export function CheckInScanner({ events, sessions, ticketTypes }: CheckInScanner
           ticketTypeId: walkUp.ticketTypeId,
           paymentMode: walkUp.paymentMode,
         });
+        await loadAttendees(eventId, sessionId);
       }
     });
   }
@@ -229,6 +321,8 @@ export function CheckInScanner({ events, sessions, ticketTypes }: CheckInScanner
                   setEventId(event.target.value);
                   setLookupResults([]);
                   setLookupMessage(null);
+                  setAttendeeFilter("all");
+                  setAttendeeListQuery("");
                 }}
                 options={events.map((event) => ({ label: event.title, value: event.id }))}
               />
@@ -242,6 +336,8 @@ export function CheckInScanner({ events, sessions, ticketTypes }: CheckInScanner
                   setSessionId(event.target.value);
                   setLookupResults([]);
                   setLookupMessage(null);
+                  setAttendeeFilter("all");
+                  setAttendeeListQuery("");
                 }}
                 options={[
                   { label: "Event-level check-in", value: "" },
@@ -292,6 +388,25 @@ export function CheckInScanner({ events, sessions, ticketTypes }: CheckInScanner
               </form>
             </CardContent>
           </Card>
+
+          <AttendeeCheckInList
+            attendees={visibleAttendees}
+            totalCount={attendees.length}
+            checkedInCount={checkedInCount}
+            filter={attendeeFilter}
+            onFilterChange={setAttendeeFilter}
+            query={attendeeListQuery}
+            onQueryChange={setAttendeeListQuery}
+            message={attendeeListMessage}
+            scopeLabel={checkInScopeLabel}
+            isRefreshing={isRefreshingAttendees}
+            isCheckingIn={isCheckingIn}
+            onRefresh={() => void loadAttendees(eventId, sessionId)}
+            onCheckIn={(code) => {
+              setTicketCode(code);
+              submitTicket(code);
+            }}
+          />
 
           <Card>
             <CardHeader>
@@ -459,6 +574,171 @@ export function CheckInScanner({ events, sessions, ticketTypes }: CheckInScanner
         </Card>
       </div>
     </div>
+  );
+}
+
+function AttendeeCheckInList({
+  attendees,
+  totalCount,
+  checkedInCount,
+  filter,
+  onFilterChange,
+  query,
+  onQueryChange,
+  message,
+  scopeLabel,
+  isRefreshing,
+  isCheckingIn,
+  onRefresh,
+  onCheckIn,
+}: {
+  attendees: EventAttendeeSummary[];
+  totalCount: number;
+  checkedInCount: number;
+  filter: "all" | "checked_in" | "not_checked_in";
+  onFilterChange: (filter: "all" | "checked_in" | "not_checked_in") => void;
+  query: string;
+  onQueryChange: (query: string) => void;
+  message: string | null;
+  scopeLabel: string;
+  isRefreshing: boolean;
+  isCheckingIn: boolean;
+  onRefresh: () => void;
+  onCheckIn: (ticketCode: string) => void;
+}) {
+  const notCheckedInCount = Math.max(totalCount - checkedInCount, 0);
+  const filters = [
+    { label: "All", value: "all", count: totalCount },
+    { label: "Checked in", value: "checked_in", count: checkedInCount },
+    { label: "Not in", value: "not_checked_in", count: notCheckedInCount },
+  ] as const;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <CardTitle>Attendee List</CardTitle>
+            <p className="mt-1 text-sm text-[#999999]">{scopeLabel}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="success">{checkedInCount} checked in</Badge>
+            <Badge variant="muted">{notCheckedInCount} not checked in</Badge>
+            <Button type="button" variant="outline" size="sm" onClick={onRefresh} disabled={isRefreshing}>
+              <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} aria-hidden />
+              Refresh
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+          <div>
+            <Label htmlFor="attendee-list-filter" className="sr-only">
+              Filter attendees
+            </Label>
+            <Input
+              id="attendee-list-filter"
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              placeholder="Filter attendees"
+              autoComplete="off"
+            />
+          </div>
+          <div className="grid grid-cols-3 overflow-hidden rounded-md border border-white/10">
+            {filters.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => onFilterChange(option.value)}
+                className={`min-w-0 border-r border-white/10 px-3 py-2 text-sm transition last:border-r-0 ${
+                  filter === option.value ? "bg-[#b20711] text-white" : "bg-[#0b0b0b] text-[#dddddd] hover:bg-white/10"
+                }`}
+              >
+                <span className="block truncate">{option.label}</span>
+                <span className="block text-xs opacity-75">{option.count}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {message ? <p className="text-sm text-red-200">{message}</p> : null}
+
+        {totalCount ? (
+          attendees.length ? (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[820px] text-left text-sm">
+                <thead className="text-[#999999]">
+                  <tr className="border-b border-white/10">
+                    <th className="py-3 pr-4 font-medium">Name</th>
+                    <th className="py-3 pr-4 font-medium">Ticket</th>
+                    <th className="py-3 pr-4 font-medium">Contact</th>
+                    <th className="py-3 pr-4 font-medium">Check-in</th>
+                    <th className="py-3 text-right font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attendees.map((attendee) => (
+                    <tr key={attendee.registration_id} className="border-b border-white/5 last:border-b-0">
+                      <td className="py-4 pr-4 text-white">
+                        <p className="font-medium">{attendee.full_name}</p>
+                        <p className="text-[#999999]">{attendee.company ?? attendee.role_title ?? "No company listed"}</p>
+                      </td>
+                      <td className="py-4 pr-4 text-[#dddddd]">
+                        <p>{attendee.ticket_type_name ?? "No ticket type"}</p>
+                        <p className="font-mono text-[#999999]">{attendee.ticket_code ?? "No ticket issued"}</p>
+                      </td>
+                      <td className="py-4 pr-4 text-[#999999]">
+                        <p>{attendee.email ?? "No email"}</p>
+                        <p>{attendee.phone ?? "No phone"}</p>
+                      </td>
+                      <td className="py-4 pr-4">
+                        {attendee.checked_in_at ? (
+                          <div className="space-y-2">
+                            <Badge variant="success" className="gap-1">
+                              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                              Checked in
+                            </Badge>
+                            <p className="text-[#999999]">{formatDate(attendee.checked_in_at)}</p>
+                          </div>
+                        ) : (
+                          <Badge variant="muted" className="gap-1">
+                            <Clock3 className="h-3.5 w-3.5" aria-hidden />
+                            Not checked in
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="py-4 text-right">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={attendee.checked_in_at ? "outline" : "default"}
+                          disabled={!attendee.ticket_code || isCheckingIn}
+                          onClick={() => {
+                            if (attendee.ticket_code) onCheckIn(attendee.ticket_code);
+                          }}
+                        >
+                          <TicketCheck className="h-4 w-4" aria-hidden />
+                          {attendee.checked_in_at ? "Review" : "Check In"}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="rounded-md border border-white/10 px-4 py-8 text-sm text-[#999999]">
+              No attendees match the current filters.
+            </div>
+          )
+        ) : (
+          <div className="rounded-md border border-white/10 px-4 py-8 text-sm text-[#999999]">
+            No attendees have registered for this event yet.
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

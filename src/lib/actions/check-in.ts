@@ -7,10 +7,21 @@ import { createTicketCode, hashTicketToken } from "@/lib/security/qr";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { checkInLookupSchema, checkInSchema, walkUpCheckInSchema } from "@/lib/validation";
-import type { CheckInLookupResponse, CheckInResult, Role, WalkUpCheckInResult } from "@/lib/types";
+import type { AttendeeSummary, CheckInLookupResponse, CheckInResult, EventAttendeeSummary, Role, WalkUpCheckInResult } from "@/lib/types";
 import { writeAuditLog } from "@/lib/audit";
 
-const demoCheckedInCodes = new Set<string>();
+type CheckInAttendeeListResponse = {
+  ok: boolean;
+  message?: string;
+  attendees: EventAttendeeSummary[];
+};
+
+const checkInAttendeeListSchema = checkInSchema.pick({
+  eventId: true,
+  sessionId: true,
+});
+
+const demoCheckedInCodes = new Map<string, string>();
 const demoTicketProfiles = new Map<string, { attendeeName: string; ticketTypeName: string }>([
   ["FCF-DEMO-2026", { attendeeName: "Maya Reed", ticketTypeName: "General Admission" }],
   ["FCF-ANDRE-2026", { attendeeName: "Andre Singh", ticketTypeName: "VIP" }],
@@ -32,21 +43,23 @@ function demoCheckIn(values: { ticketCode: string; eventId: string; sessionId?: 
     ticketTypeName: "General Admission",
   };
 
-  if (demoCheckedInCodes.has(key)) {
+  const priorCheckedInAt = demoCheckedInCodes.get(key);
+  if (priorCheckedInAt) {
     return {
       result: "duplicate",
       attendeeName: profile.attendeeName,
       ticketTypeName: profile.ticketTypeName,
-      priorCheckedInAt: new Date().toISOString(),
+      priorCheckedInAt,
     };
   }
 
-  demoCheckedInCodes.add(key);
+  const checkedInAt = new Date().toISOString();
+  demoCheckedInCodes.set(key, checkedInAt);
   return {
     result: "success",
     attendeeName: profile.attendeeName,
     ticketTypeName: profile.ticketTypeName,
-    checkedInAt: new Date().toISOString(),
+    checkedInAt,
   };
 }
 
@@ -76,9 +89,33 @@ function demoLookup(input: { eventId: string; sessionId?: string | null; query: 
         attendeeEmail: attendee.email,
         attendeePhone: attendee.phone,
         ticketTypeName: profile.ticketTypeName,
-        checkedInAt: demoCheckedInCodes.has(checkInKey(ticketCode, input.eventId, input.sessionId))
-          ? new Date().toISOString()
-          : null,
+        checkedInAt: demoCheckedInCodes.get(checkInKey(ticketCode, input.eventId, input.sessionId)) ?? null,
+      };
+    }),
+  };
+}
+
+function demoCheckInAttendeeList(input: { eventId: string; sessionId?: string | null }): CheckInAttendeeListResponse {
+  if (!demoEvents.some((event) => event.id === input.eventId)) {
+    return { ok: true, attendees: [] };
+  }
+
+  return {
+    ok: true,
+    attendees: demoAttendees.map((attendee, index) => {
+      const ticketCode = index === 0 ? "FCF-DEMO-2026" : "FCF-ANDRE-2026";
+      const ticketType = demoTicketTypes[index] ?? demoTicketTypes[0];
+
+      return {
+        ...attendee,
+        registration_id: `99999999-9999-4999-8999-99999999999${index + 1}`,
+        registration_status: "confirmed",
+        payment_status: index === 0 ? "paid" : "pending",
+        registered_at: attendee.last_registered_at ?? new Date().toISOString(),
+        ticket_code: ticketCode,
+        ticket_status: "active",
+        ticket_type_name: ticketType?.name ?? null,
+        checked_in_at: demoCheckedInCodes.get(checkInKey(ticketCode, input.eventId, input.sessionId)) ?? null,
       };
     }),
   };
@@ -425,6 +462,114 @@ export async function searchCheckInGuests(input: unknown): Promise<CheckInLookup
   };
 }
 
+export async function listCheckInAttendees(input: unknown): Promise<CheckInAttendeeListResponse> {
+  const parsed = checkInAttendeeListSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: parsed.error.issues[0]?.message ?? "Invalid attendee list request.",
+      attendees: [],
+    };
+  }
+
+  const values = parsed.data;
+
+  if (!isServiceRoleConfigured()) {
+    return demoCheckInAttendeeList(values);
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const userId = await getCurrentUserId();
+
+  if (process.env.NODE_ENV === "production" && !userId) {
+    return { ok: false, message: "You are not authorized to view check-in attendees.", attendees: [] };
+  }
+
+  const { data: event } = await supabase
+    .from("events")
+    .select("id, organization_id")
+    .eq("id", values.eventId)
+    .maybeSingle();
+
+  if (!event) return { ok: false, message: "Event is not available.", attendees: [] };
+
+  const hasAccess = await canUseCheckIn(supabase, event.organization_id, event.id, userId);
+  if (!hasAccess) {
+    return { ok: false, message: "You are not authorized to view this event check-in list.", attendees: [] };
+  }
+
+  const { data: registrations, error } = await supabase
+    .from("registrations")
+    .select("id, attendee_id, ticket_type_id, status, payment_status, registered_at")
+    .eq("event_id", values.eventId)
+    .order("registered_at", { ascending: false });
+
+  if (error) return { ok: false, message: "Could not load attendees.", attendees: [] };
+  if (!registrations?.length) return { ok: true, attendees: [] };
+
+  const registrationIds = registrations.map((registration) => registration.id as string);
+  const attendeeIds = [...new Set(registrations.map((registration) => registration.attendee_id as string))];
+  const registrationTicketTypeIds = registrations
+    .map((registration) => registration.ticket_type_id)
+    .filter((id): id is string => Boolean(id));
+
+  const [{ data: attendees }, { data: ticketTypes }, { data: tickets }, attendanceLogs] = await Promise.all([
+    supabase.from("attendees").select("*").in("id", attendeeIds),
+    registrationTicketTypeIds.length
+      ? supabase.from("ticket_types").select("id, name").in("id", registrationTicketTypeIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    supabase
+      .from("tickets")
+      .select("id, registration_id, ticket_code, status, ticket_type_id")
+      .eq("event_id", values.eventId)
+      .in("registration_id", registrationIds),
+    fetchAttendanceLogsByRegistration(supabase, registrationIds, values.eventId, values.sessionId),
+  ]);
+
+  const attendeeById = new Map(((attendees ?? []) as AttendeeSummary[]).map((attendee) => [attendee.id, attendee]));
+  const ticketTypeById = new Map((ticketTypes ?? []).map((ticketType) => [ticketType.id, ticketType.name]));
+  const ticketByRegistrationId = new Map(
+    (tickets ?? []).map((ticket) => [
+      ticket.registration_id,
+      {
+        code: ticket.ticket_code as string,
+        status: ticket.status as EventAttendeeSummary["ticket_status"],
+        ticketTypeId: ticket.ticket_type_id as string | null,
+      },
+    ]),
+  );
+  const checkInByRegistrationId = new Map<string, string>();
+
+  for (const log of attendanceLogs) {
+    if (!checkInByRegistrationId.has(log.registration_id)) {
+      checkInByRegistrationId.set(log.registration_id, log.checked_in_at);
+    }
+  }
+
+  return {
+    ok: true,
+    attendees: registrations.flatMap((registration) => {
+      const attendee = attendeeById.get(registration.attendee_id);
+      if (!attendee) return [];
+
+      const ticket = ticketByRegistrationId.get(registration.id);
+      const ticketTypeId = registration.ticket_type_id ?? ticket?.ticketTypeId ?? null;
+
+      return {
+        ...attendee,
+        registration_id: registration.id,
+        registration_status: String(registration.status),
+        payment_status: String(registration.payment_status),
+        registered_at: String(registration.registered_at),
+        ticket_code: ticket?.code ?? null,
+        ticket_status: ticket?.status ?? null,
+        ticket_type_name: ticketTypeId ? ticketTypeById.get(ticketTypeId) ?? null : null,
+        checked_in_at: checkInByRegistrationId.get(registration.id) ?? null,
+      };
+    }),
+  };
+}
+
 export async function createWalkUpCheckIn(input: unknown): Promise<WalkUpCheckInResult> {
   const parsed = walkUpCheckInSchema.safeParse(input);
   if (!parsed.success) {
@@ -593,6 +738,25 @@ async function fetchAttendanceLogs(
   query = sessionId ? query.eq("session_id", sessionId) : query.is("session_id", null);
   const { data } = await query;
   return data ?? [];
+}
+
+async function fetchAttendanceLogsByRegistration(
+  supabase: SupabaseAdminClient,
+  registrationIds: string[],
+  eventId: string,
+  sessionId?: string | null,
+) {
+  let query = supabase
+    .from("attendance_logs")
+    .select("registration_id, checked_in_at")
+    .eq("event_id", eventId)
+    .eq("scope", sessionId ? "session" : "event")
+    .in("registration_id", registrationIds)
+    .order("checked_in_at", { ascending: false });
+
+  query = sessionId ? query.eq("session_id", sessionId) : query.is("session_id", null);
+  const { data } = await query;
+  return (data ?? []) as { registration_id: string; checked_in_at: string }[];
 }
 
 async function findExistingWalkUpAttendee(

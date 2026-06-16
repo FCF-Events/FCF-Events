@@ -197,6 +197,7 @@ export async function registerForEvent(input: unknown): Promise<RegistrationResu
         attendeeName: `${values.firstName} ${values.lastName}`.trim(),
         eventTitle: event.title,
         eventStartsAt: event.starts_at,
+        eventEndsAt: event.ends_at,
         eventTimezone: event.timezone,
         venueName: event.venue_name,
         address: event.address,

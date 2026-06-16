@@ -221,7 +221,7 @@ async function sendTicketConfirmationIfNeeded(
   const [{ data: event }, { data: attendee }, ticketTypeResult] = await Promise.all([
     supabase
       .from("events")
-      .select("title, starts_at, timezone, venue_name, address")
+      .select("title, starts_at, ends_at, timezone, venue_name, address")
       .eq("id", registration.event_id)
       .maybeSingle(),
     supabase
@@ -249,6 +249,7 @@ async function sendTicketConfirmationIfNeeded(
       attendeeName,
       eventTitle: event.title,
       eventStartsAt: event.starts_at,
+      eventEndsAt: event.ends_at,
       eventTimezone: event.timezone,
       venueName: event.venue_name,
       address: event.address,

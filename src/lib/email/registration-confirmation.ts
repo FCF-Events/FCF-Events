@@ -12,6 +12,7 @@ type RegistrationConfirmationInput = {
   attendeeName: string;
   eventTitle: string;
   eventStartsAt: string;
+  eventEndsAt: string;
   eventTimezone: string | null;
   venueName: string | null;
   address: string | null;
@@ -45,6 +46,29 @@ export async function sendRegistrationConfirmationEmail(
   const startsAt = formatEventDate(input.eventStartsAt, input.eventTimezone);
   const location = eventLocationLabel(input.venueName, input.address) || "Venue TBA";
   const ticketPrice = currency(input.ticketPrice, input.ticketCurrency);
+  const calendarUrl = googleCalendarUrl({
+    title: input.eventTitle,
+    startsAt: input.eventStartsAt,
+    endsAt: input.eventEndsAt,
+    location,
+    details: [
+      `Ticket code: ${input.ticketCode}`,
+      `Ticket type: ${input.ticketTypeName} (${ticketPrice})`,
+      `Ticket: ${ticketLink}`,
+    ].join("\n"),
+  });
+  const calendarFile = calendarFileContent({
+    title: input.eventTitle,
+    startsAt: input.eventStartsAt,
+    endsAt: input.eventEndsAt,
+    location,
+    details: [
+      `Ticket code: ${input.ticketCode}`,
+      `Ticket type: ${input.ticketTypeName} (${ticketPrice})`,
+      `Ticket: ${ticketLink}`,
+    ].join("\n"),
+    url: ticketLink,
+  });
   const template = await getEmailTemplateForSend(input.organizationId, REGISTRATION_CONFIRMATION_TEMPLATE_NAME);
   const templateValues = {
     first_name: input.attendeeName.split(" ")[0] ?? input.attendeeName,
@@ -56,11 +80,22 @@ export async function sendRegistrationConfirmationEmail(
     ticket_price: ticketPrice,
     ticket_code: input.ticketCode,
     ticket_url: ticketLink,
+    calendar_url: calendarUrl,
   };
   const subject = renderEmailTemplate(template?.subject ?? "Your FCF ticket for {{event}}", templateValues);
-  const text = renderEmailTemplate(
-    template?.body ?? "Hi {{first_name}},\n\nYour registration for {{event}} is confirmed.\n\nOpen your QR ticket: {{ticket_url}}",
-    templateValues,
+  const text = withRequiredPlainTextDetails(
+    renderEmailTemplate(
+      template?.body ?? "Hi {{first_name}},\n\nYour registration for {{event}} is confirmed.\n\nOpen your QR ticket: {{ticket_url}}",
+      templateValues,
+    ),
+    {
+      eventTitle: input.eventTitle,
+      startsAt,
+      location,
+      ticketCode: input.ticketCode,
+      ticketLink,
+      calendarUrl,
+    },
   );
 
   const html = `<!doctype html>
@@ -85,9 +120,16 @@ export async function sendRegistrationConfirmationEmail(
                   <img src="cid:${qrContentId}" width="240" height="240" alt="Ticket QR code" style="display:inline-block;border:12px solid #ffffff;outline:1px solid #e5e5e5;" />
                 </div>
                 <p style="margin:0 0 20px;font-size:15px;line-height:1.5;">Bring this QR code with you for check-in. Staff will validate your ticket status at the door.</p>
-                <p style="margin:0;">
-                  <a href="${escapeHtml(ticketLink)}" style="display:inline-block;background:#e50913;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 18px;">Open ticket</a>
-                </p>
+                <table role="presentation" cellspacing="0" cellpadding="0" style="margin:0;">
+                  <tr>
+                    <td style="padding:0 10px 10px 0;">
+                      <a href="${escapeHtml(ticketLink)}" style="display:inline-block;background:#e50913;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 18px;">Open ticket</a>
+                    </td>
+                    <td style="padding:0 0 10px 0;">
+                      <a href="${escapeHtml(calendarUrl)}" style="display:inline-block;background:#111111;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 18px;">Add to calendar</a>
+                    </td>
+                  </tr>
+                </table>
               </td>
             </tr>
           </table>
@@ -110,6 +152,12 @@ export async function sendRegistrationConfirmationEmail(
         content_id: qrContentId,
         content_disposition: "inline",
       },
+      {
+        filename: `${safeFileName(input.eventTitle)}.ics`,
+        content: Buffer.from(calendarFile).toString("base64"),
+        content_type: "text/calendar; charset=utf-8; method=PUBLISH",
+        content_disposition: "attachment",
+      },
     ],
     tags: {
       type: "registration_confirmation",
@@ -128,6 +176,114 @@ function formatEventDate(value: string, timezone: string | null) {
     timeStyle: "short",
     timeZone: timezone ?? "America/Toronto",
   }).format(new Date(value));
+}
+
+function googleCalendarUrl(input: {
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  location: string;
+  details: string;
+}) {
+  const url = new URL("https://calendar.google.com/calendar/render");
+  url.searchParams.set("action", "TEMPLATE");
+  url.searchParams.set("text", input.title);
+  url.searchParams.set("dates", `${calendarDate(input.startsAt)}/${calendarDate(input.endsAt)}`);
+  url.searchParams.set("details", input.details);
+  url.searchParams.set("location", input.location);
+  return url.toString();
+}
+
+function calendarFileContent(input: {
+  title: string;
+  startsAt: string;
+  endsAt: string;
+  location: string;
+  details: string;
+  url: string;
+}) {
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//FCF Events//Registration Confirmation//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "BEGIN:VEVENT",
+    `UID:${safeFileName(input.title)}-${calendarDate(input.startsAt)}@fcf.events`,
+    `DTSTAMP:${calendarDate(new Date().toISOString())}`,
+    `DTSTART:${calendarDate(input.startsAt)}`,
+    `DTEND:${calendarDate(input.endsAt)}`,
+    `SUMMARY:${escapeCalendarText(input.title)}`,
+    `DESCRIPTION:${escapeCalendarText(input.details)}`,
+    `LOCATION:${escapeCalendarText(input.location)}`,
+    `URL:${escapeCalendarText(input.url)}`,
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ];
+
+  return `${lines.flatMap(foldCalendarLine).join("\r\n")}\r\n`;
+}
+
+function calendarDate(value: string) {
+  return new Date(value).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function escapeCalendarText(value: string) {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\r?\n/g, "\\n")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+function foldCalendarLine(line: string) {
+  const folded: string[] = [];
+  let remaining = line;
+
+  while (remaining.length > 75) {
+    folded.push(remaining.slice(0, 75));
+    remaining = ` ${remaining.slice(75)}`;
+  }
+
+  folded.push(remaining);
+  return folded;
+}
+
+function withRequiredPlainTextDetails(
+  value: string,
+  details: {
+    eventTitle: string;
+    startsAt: string;
+    location: string;
+    ticketCode: string;
+    ticketLink: string;
+    calendarUrl: string;
+  },
+) {
+  const requiredLines = [
+    { value: details.eventTitle, line: `Event: ${details.eventTitle}` },
+    { value: details.startsAt, line: `When: ${details.startsAt}` },
+    { value: details.location, line: `Where: ${details.location}` },
+    { value: details.ticketCode, line: `Ticket code: ${details.ticketCode}` },
+    { value: details.ticketLink, line: `Open your QR ticket: ${details.ticketLink}` },
+    { value: details.calendarUrl, line: `Add to calendar: ${details.calendarUrl}` },
+  ];
+  const normalized = value.toLowerCase();
+  const missingLines = requiredLines
+    .filter((item) => !normalized.includes(item.value.toLowerCase()))
+    .map((item) => item.line);
+
+  return missingLines.length ? `${value.trim()}\n\n${missingLines.join("\n")}` : value;
+}
+
+function safeFileName(value: string) {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "fcf-event"
+  );
 }
 
 function detailRow(label: string, value: string) {

@@ -154,14 +154,19 @@ export async function getAttendeeEventTickets(attendeeId: string): Promise<Atten
     .map((registration) => registration.ticket_type_id)
     .filter((id): id is string => Boolean(id));
 
-  const [{ data: events }, { data: tickets }, { data: sessionRows }] = await Promise.all([
-    supabase.from("events").select("id, title, slug, starts_at, ends_at, timezone, venue_name").in("id", eventIds),
+  const [{ data: events }, { data: tickets }, { data: sessionRows }, { data: attendanceLogs }] = await Promise.all([
+    supabase.from("events").select("id, title, slug, starts_at, ends_at, timezone, venue_name, status").in("id", eventIds),
     supabase
       .from("tickets")
       .select("id, registration_id, ticket_code, status, issued_at, ticket_type_id")
       .in("registration_id", registrationIds)
       .order("issued_at", { ascending: false }),
     supabase.from("registration_sessions").select("registration_id, session_id").in("registration_id", registrationIds),
+    supabase
+      .from("attendance_logs")
+      .select("registration_id, scope, checked_in_at")
+      .in("registration_id", registrationIds)
+      .order("checked_in_at", { ascending: false }),
   ]);
 
   const ticketTypeIds = [
@@ -197,6 +202,8 @@ export async function getAttendeeEventTickets(attendeeId: string): Promise<Atten
   );
   const sessionById = new Map(((sessions ?? []) as TicketDetailSession[]).map((session) => [session.id, session]));
   const sessionsByRegistrationId = new Map<string, TicketDetailSession[]>();
+  const eventCheckInByRegistrationId = new Map<string, string>();
+  const sessionCheckInCountByRegistrationId = new Map<string, number>();
 
   for (const row of sessionRows ?? []) {
     const session = sessionById.get(row.session_id);
@@ -205,6 +212,19 @@ export async function getAttendeeEventTickets(attendeeId: string): Promise<Atten
     const current = sessionsByRegistrationId.get(row.registration_id) ?? [];
     current.push(session);
     sessionsByRegistrationId.set(row.registration_id, current);
+  }
+
+  for (const log of attendanceLogs ?? []) {
+    if (log.scope === "event" && !eventCheckInByRegistrationId.has(log.registration_id)) {
+      eventCheckInByRegistrationId.set(log.registration_id, log.checked_in_at);
+    }
+
+    if (log.scope === "session") {
+      sessionCheckInCountByRegistrationId.set(
+        log.registration_id,
+        (sessionCheckInCountByRegistrationId.get(log.registration_id) ?? 0) + 1,
+      );
+    }
   }
 
   return registrations.flatMap((registration) => {
@@ -227,12 +247,16 @@ export async function getAttendeeEventTickets(attendeeId: string): Promise<Atten
       event_starts_at: String(event.starts_at),
       event_ends_at: String(event.ends_at),
       event_timezone: String(event.timezone ?? "America/Toronto"),
+      event_status: event.status as AttendeeEventTicket["event_status"],
       venue_name: event.venue_name ?? null,
+      ticket_type_id: ticketTypeId,
       ticket_type_name: ticketTypeId ? ticketTypeById.get(ticketTypeId) ?? null : null,
       ticket_id: ticket?.id ?? null,
       ticket_code: ticket?.code ?? null,
       ticket_status: ticket?.status ?? null,
       issued_at: ticket?.issuedAt ?? null,
+      checked_in_at: eventCheckInByRegistrationId.get(registration.id) ?? null,
+      session_check_in_count: sessionCheckInCountByRegistrationId.get(registration.id) ?? 0,
       sessions: sessionsByRegistrationId.get(registration.id) ?? [],
     };
   });
@@ -704,12 +728,16 @@ function demoAttendeeEventTickets(attendeeId: string): AttendeeEventTicket[] {
         event_starts_at: event.starts_at,
         event_ends_at: event.ends_at,
         event_timezone: event.timezone,
+        event_status: event.status,
         venue_name: event.venue_name,
+        ticket_type_id: ticketType.id,
         ticket_type_name: ticketType.name,
         ticket_id: null,
         ticket_code: null,
         ticket_status: null,
         issued_at: null,
+        checked_in_at: null,
+        session_check_in_count: 0,
         sessions: demoSessions.filter((session) => session.event_id === event.id),
       },
     ];
@@ -731,12 +759,16 @@ function demoAttendeeEventTickets(attendeeId: string): AttendeeEventTicket[] {
     event_starts_at: ticket.event_starts_at,
     event_ends_at: ticket.event_ends_at,
     event_timezone: "America/Toronto",
+    event_status: ticket.event_id === demoEvents[0].id ? demoEvents[0].status : "past",
     venue_name: ticket.venue_name,
+    ticket_type_id: ticket.event_id === demoEvents[0].id ? demoTicketTypes[0]?.id ?? null : null,
     ticket_type_name: ticket.ticket_type_name,
     ticket_id: ticket.ticket_id,
     ticket_code: ticket.ticket_code,
     ticket_status: ticket.ticket_status,
     issued_at: ticket.issued_at,
+    checked_in_at: ticket.ticket_status === "used" ? ticket.issued_at : null,
+    session_check_in_count: ticket.event_id === demoEvents[0].id ? 1 : 0,
     sessions: ticket.event_id === demoEvents[0].id ? demoSessions.filter((session) => session.event_id === ticket.event_id) : [],
   }));
 }

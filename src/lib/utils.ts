@@ -39,6 +39,14 @@ export function googleMapsSearchUrl(query: string | null | undefined) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(normalizedQuery)}`;
 }
 
+export function toDateTimeLocalInputValue(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 16);
+}
+
 export function formatPhoneNumber(value: string) {
   const digits = value.replace(/\D/g, "");
   const localDigits = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;

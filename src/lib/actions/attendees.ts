@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireDashboardAccess } from "@/lib/auth";
 import { isServiceRoleConfigured } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { attendeeUpdateSchema } from "@/lib/validation";
+import { attendeeRegistrationUpdateSchema, attendeeUpdateSchema } from "@/lib/validation";
 import { writeAuditLog } from "@/lib/audit";
 
 type AttendeeActionResult = {
@@ -81,4 +81,182 @@ export async function updateAttendeeAction(input: FormData): Promise<AttendeeAct
   revalidatePath(`/dashboard/attendees/${attendee.id}`);
 
   return { ok: true, message: "Attendee updated." };
+}
+
+export async function updateAttendeeRegistrationEventAction(input: FormData): Promise<AttendeeActionResult> {
+  const access = await requireDashboardAccess(["owner", "admin", "manager"]);
+  const parsed = attendeeRegistrationUpdateSchema.safeParse({
+    attendeeId: input.get("attendeeId"),
+    registrationId: input.get("registrationId"),
+    eventId: input.get("eventId"),
+    ticketTypeId: input.get("ticketTypeId") || "",
+    sessionIds: input.getAll("sessionIds").map(String),
+    registrationStatus: input.get("registrationStatus"),
+    paymentStatus: input.get("paymentStatus"),
+  });
+
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0]?.message ?? "Invalid event assignment." };
+  }
+
+  if (!isServiceRoleConfigured()) {
+    return { ok: true, message: "Event assignment validated. Connect Supabase to persist it." };
+  }
+
+  const values = parsed.data;
+  const sessionIds = [...new Set(values.sessionIds)];
+  const ticketTypeId = values.ticketTypeId || null;
+  const supabase = createSupabaseAdminClient();
+
+  const { data: registration, error: registrationError } = await supabase
+    .from("registrations")
+    .select("id, organization_id, attendee_id, event_id, ticket_type_id")
+    .eq("id", values.registrationId)
+    .eq("attendee_id", values.attendeeId)
+    .maybeSingle();
+
+  if (registrationError) return { ok: false, message: registrationError.message };
+  if (!registration) return { ok: false, message: "Registration not found for this attendee." };
+
+  const { data: targetEvent, error: eventError } = await supabase
+    .from("events")
+    .select("id, organization_id, slug, title")
+    .eq("id", values.eventId)
+    .maybeSingle();
+
+  if (eventError) return { ok: false, message: eventError.message };
+  if (!targetEvent || targetEvent.organization_id !== registration.organization_id) {
+    return { ok: false, message: "Target event is not available for this attendee." };
+  }
+
+  const eventChanged = registration.event_id !== values.eventId;
+  if (eventChanged) {
+    const { count: attendanceCount } = await supabase
+      .from("attendance_logs")
+      .select("*", { count: "exact", head: true })
+      .eq("registration_id", values.registrationId);
+
+    if ((attendanceCount ?? 0) > 0) {
+      return { ok: false, message: "This registration already has check-in history, so it cannot be moved to another event." };
+    }
+  }
+
+  let amountDue: number | null = null;
+  if (ticketTypeId) {
+    const { data: ticketType, error: ticketTypeError } = await supabase
+      .from("ticket_types")
+      .select("id, event_id, price")
+      .eq("id", ticketTypeId)
+      .eq("event_id", values.eventId)
+      .maybeSingle();
+
+    if (ticketTypeError) return { ok: false, message: ticketTypeError.message };
+    if (!ticketType) return { ok: false, message: "Choose a ticket type that belongs to the selected event." };
+    amountDue = Number(ticketType.price ?? 0);
+  }
+
+  if (sessionIds.length) {
+    const { data: matchingSessions, error: sessionError } = await supabase
+      .from("sessions")
+      .select("id")
+      .eq("event_id", values.eventId)
+      .in("id", sessionIds);
+
+    if (sessionError) return { ok: false, message: sessionError.message };
+    if ((matchingSessions ?? []).length !== sessionIds.length) {
+      return { ok: false, message: "Selected sessions must belong to the selected event." };
+    }
+  }
+
+  const registrationUpdate: Record<string, unknown> = {
+    event_id: values.eventId,
+    ticket_type_id: ticketTypeId,
+    status: values.registrationStatus,
+    payment_status: values.paymentStatus,
+    cancelled_at: values.registrationStatus === "cancelled" ? new Date().toISOString() : null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (amountDue !== null) {
+    registrationUpdate.amount_due = amountDue;
+  }
+
+  const { error: updateError } = await supabase
+    .from("registrations")
+    .update(registrationUpdate)
+    .eq("id", values.registrationId);
+
+  if (updateError) return { ok: false, message: updateError.message };
+
+  const ticketUpdate: Record<string, unknown> = {
+    event_id: values.eventId,
+    ticket_type_id: ticketTypeId,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (values.registrationStatus === "cancelled") {
+    ticketUpdate.status = "cancelled";
+  }
+
+  const { error: ticketError } = await supabase
+    .from("tickets")
+    .update(ticketUpdate)
+    .eq("registration_id", values.registrationId);
+
+  if (ticketError) return { ok: false, message: ticketError.message };
+
+  const { error: deleteSessionsError } = await supabase
+    .from("registration_sessions")
+    .delete()
+    .eq("registration_id", values.registrationId);
+
+  if (deleteSessionsError) return { ok: false, message: deleteSessionsError.message };
+
+  if (sessionIds.length) {
+    const { error: insertSessionsError } = await supabase.from("registration_sessions").insert(
+      sessionIds.map((sessionId) => ({
+        organization_id: registration.organization_id,
+        registration_id: values.registrationId,
+        session_id: sessionId,
+        status: values.registrationStatus,
+      })),
+    );
+
+    if (insertSessionsError) return { ok: false, message: insertSessionsError.message };
+  }
+
+  await writeAuditLog({
+    organizationId: registration.organization_id,
+    actorUserId: access.userId ?? undefined,
+    action: "attendee.registration.updated",
+    entityType: "registration",
+    entityId: values.registrationId,
+    metadata: {
+      attendeeId: values.attendeeId,
+      oldEventId: registration.event_id,
+      newEventId: values.eventId,
+      ticketTypeId,
+      sessionIds,
+      registrationStatus: values.registrationStatus,
+      paymentStatus: values.paymentStatus,
+    },
+  });
+
+  if (eventChanged) {
+    const { data: oldEvent } = await supabase
+      .from("events")
+      .select("slug")
+      .eq("id", registration.event_id)
+      .maybeSingle();
+
+    if (oldEvent?.slug) {
+      revalidatePath(`/dashboard/events/${oldEvent.slug}`);
+    }
+  }
+
+  revalidatePath("/dashboard/attendees");
+  revalidatePath(`/dashboard/attendees/${values.attendeeId}`);
+  revalidatePath(`/dashboard/events/${targetEvent.slug}`);
+
+  return { ok: true, message: "Event assignment updated." };
 }

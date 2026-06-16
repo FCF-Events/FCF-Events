@@ -14,6 +14,7 @@ export const EMAIL_TEMPLATE_TOKENS = [
   { token: "{{ticket_price}}", label: "Ticket price" },
   { token: "{{ticket_code}}", label: "Ticket code" },
   { token: "{{ticket_url}}", label: "Ticket URL" },
+  { token: "{{calendar_url}}", label: "Add to calendar URL" },
 ];
 
 export type EmailTemplateDraft = {
@@ -39,6 +40,7 @@ export const DEFAULT_EMAIL_TEMPLATES: EmailTemplateDraft[] = [
       "Ticket code: {{ticket_code}}",
       "",
       "Open your QR ticket: {{ticket_url}}",
+      "Add to calendar: {{calendar_url}}",
       "",
       "Bring this QR code with you for check-in. Staff will validate your ticket status at the door.",
     ].join("\n"),
