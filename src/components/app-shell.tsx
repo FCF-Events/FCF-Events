@@ -88,11 +88,21 @@ export function AppShell({
             </Link>
           ))}
         </nav>
-        <div className="absolute bottom-4 left-4 right-4 rounded-md border border-white/10 bg-[#0b0b0b] p-3">
-          <p className="truncate text-xs text-[#999999]">{currentEmail ?? "Demo user"}</p>
+        <div className="group/account absolute bottom-4 left-4 right-4 rounded-md border border-white/10 bg-[#0b0b0b] p-3 transition hover:border-white/20 hover:bg-white/[0.03]">
+          <Link
+            href="/account/settings"
+            className="absolute inset-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e50913]"
+            aria-label="Edit account settings"
+            title="Edit account settings"
+          />
+          <p className="pointer-events-none truncate text-xs text-[#999999] transition group-hover/account:text-[#cfcfcf]">
+            {currentEmail ?? "Demo user"}
+          </p>
           <div className="mt-2 flex items-center justify-between gap-3">
-            <span className="text-sm font-medium text-white">{currentRole ? ROLE_LABELS[currentRole] : "Authenticated"}</span>
-            <form action={signOutAction}>
+            <span className="pointer-events-none text-sm font-medium text-white">
+              {currentRole ? ROLE_LABELS[currentRole] : "Authenticated"}
+            </span>
+            <form action={signOutAction} className="relative">
               <button
                 type="submit"
                 className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#999999] transition hover:bg-white/10 hover:text-white"
@@ -118,10 +128,14 @@ export function AppShell({
               />
             </Link>
             <div className="hidden text-sm text-[#999999] lg:block">Private event operations platform</div>
-            <div className="flex items-center gap-2 text-xs text-[#999999]">
+            <Link
+              href="/account/settings"
+              className="flex items-center gap-2 rounded-md px-2 py-1 text-xs text-[#999999] transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e50913]"
+              title="Edit account settings"
+            >
               <Activity className="h-4 w-4 text-emerald-300" aria-hidden />
               {currentRole ? ROLE_LABELS[currentRole] : "Demo-safe mode"}
-            </div>
+            </Link>
           </div>
           <nav className="-mx-4 mt-3 flex gap-2 overflow-x-auto border-t border-white/10 px-4 pt-3 lg:hidden">
             {items.map((item) => (
