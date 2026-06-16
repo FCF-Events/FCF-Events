@@ -1,5 +1,4 @@
 import Image from "next/image";
-import Link from "next/link";
 import { ArrowRight, KeyRound, Mail, UserRound } from "lucide-react";
 import { PublicFooter } from "@/components/public-footer";
 import { PublicHeader } from "@/components/public-header";
@@ -48,7 +47,7 @@ export default async function SignupPage({
             <p className="text-sm font-medium uppercase text-[#e50913]">Attendee account</p>
             <h1 className="mt-4 text-5xl font-semibold leading-tight">Keep your FCF tickets together</h1>
             <p className="mt-5 text-base leading-7 text-[#bbbbbb]">
-              Use the same email from registration so your tickets appear in your account.
+              Use the same email from registration and set a password so your tickets appear in your account.
             </p>
           </div>
         </div>
@@ -59,8 +58,10 @@ export default async function SignupPage({
               <UserRound className="h-5 w-5 text-[#e50913]" aria-hidden />
             </div>
             <div>
-              <CardTitle className="text-2xl">Create Account</CardTitle>
-              <CardDescription className="mt-2 text-[#bbbbbb]">Save tickets and manage attendee details.</CardDescription>
+              <CardTitle className="text-2xl">Set Password & Sign Up</CardTitle>
+              <CardDescription className="mt-2 text-[#bbbbbb]">
+                Create your account to save tickets and manage attendee details.
+              </CardDescription>
             </div>
           </CardHeader>
           <CardContent className="space-y-5 p-6 pt-4">
@@ -114,15 +115,10 @@ export default async function SignupPage({
                 </div>
               </Field>
               <Button type="submit" size="lg" className="w-full">
-                Create Account
+                Set Password & Sign Up
                 <ArrowRight className="h-4 w-4" aria-hidden />
               </Button>
             </form>
-            <Button asChild variant="outline" className="w-full">
-              <Link href="/">
-                Stay As Guest
-              </Link>
-            </Button>
           </CardContent>
         </Card>
       </section>

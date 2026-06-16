@@ -164,19 +164,16 @@ export default async function TicketPage({ params }: { params: Promise<{ ticketC
         <section className="mt-6 rounded-lg border border-white/10 bg-[#111111] p-5 print:hidden">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-lg font-semibold">Save this ticket</h2>
+              <h2 className="text-lg font-semibold">Create your account</h2>
               <p className="mt-1 text-sm leading-6 text-[#999999]">
-                Create an account to keep this ticket in one place, or continue without an account.
+                Set a password to save this ticket, manage attendee details, and access future FCF event tickets.
               </p>
             </div>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Button asChild>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <Button asChild size="lg">
                 <Link href={`/signup?${new URLSearchParams({ email: ticket.attendee_email ?? "", redirect: "/account" })}`}>
-                  Create Account
+                  Set Password & Sign Up
                 </Link>
-              </Button>
-              <Button asChild variant="outline">
-                <Link href={`/e/${ticket.event_slug}`}>Stay As Guest</Link>
               </Button>
             </div>
           </div>
