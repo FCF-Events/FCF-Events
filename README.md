@@ -18,6 +18,26 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Twilio SMS
+
+Server-side SMS sending is available at `POST /api/twilio/sms`.
+
+Required environment variables:
+
+- `TWILIO_ACCOUNT_SID`
+- `TWILIO_AUTH_TOKEN`
+- `TWILIO_FROM_NUMBER` or `TWILIO_MESSAGING_SERVICE_SID`
+
+Example request:
+
+```bash
+curl -X POST http://localhost:3000/api/twilio/sms \
+  -H "Content-Type: application/json" \
+  -d "{\"to\":\"+15555555555\",\"body\":\"Your event reminder is ready.\"}"
+```
+
+Twilio trial accounts can only send to verified recipient numbers, and SMS sending also requires a Twilio-owned SMS-capable phone number or a Messaging Service.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More
