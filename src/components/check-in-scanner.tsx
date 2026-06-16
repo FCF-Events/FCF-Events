@@ -14,6 +14,7 @@ import type {
   CheckInLookupResponse,
   CheckInLookupResult,
   CheckInResult,
+  EventDaySummary,
   EventAttendeeSummary,
   EventSummary,
   SessionSummary,
@@ -34,6 +35,7 @@ type WalkUpFormState = {
 
 type CheckInScannerProps = {
   events: EventSummary[];
+  eventDays: EventDaySummary[];
   sessions: SessionSummary[];
   ticketTypes: TicketTypeSummary[];
   initialAttendees: EventAttendeeSummary[];
@@ -56,10 +58,11 @@ const emptyWalkUpForm: WalkUpFormState = {
   paymentMode: "cash",
 };
 
-export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees }: CheckInScannerProps) {
+export function CheckInScanner({ events, eventDays, sessions, ticketTypes, initialAttendees }: CheckInScannerProps) {
   const scannerId = useId().replaceAll(":", "");
   const attendeeRequestId = useRef(0);
   const [eventId, setEventId] = useState(events[0]?.id ?? "");
+  const [eventDayId, setEventDayId] = useState(() => eventDays.find((day) => day.event_id === events[0]?.id)?.id ?? "");
   const [sessionId, setSessionId] = useState("");
   const [ticketCode, setTicketCode] = useState("");
   const [cameraActive, setCameraActive] = useState(false);
@@ -79,8 +82,12 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
   const [isAddingWalkUp, startWalkUpTransition] = useTransition();
 
   const filteredSessions = useMemo(
-    () => sessions.filter((session) => session.event_id === eventId),
-    [eventId, sessions],
+    () => sessions.filter((session) => session.event_id === eventId && (!eventDayId || !session.event_day_id || session.event_day_id === eventDayId)),
+    [eventDayId, eventId, sessions],
+  );
+  const filteredEventDays = useMemo(
+    () => eventDays.filter((day) => day.event_id === eventId),
+    [eventDays, eventId],
   );
   const activeSession = useMemo(
     () => filteredSessions.find((session) => session.id === sessionId) ?? null,
@@ -90,7 +97,11 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
     () => ticketTypes.filter((ticketType) => ticketType.event_id === eventId),
     [eventId, ticketTypes],
   );
-  const checkInScopeLabel = sessionId ? activeSession?.title ?? "Selected session" : "Event-level check-in";
+  const activeEventDay = useMemo(
+    () => filteredEventDays.find((day) => day.id === eventDayId) ?? null,
+    [eventDayId, filteredEventDays],
+  );
+  const checkInScopeLabel = `${activeEventDay?.label ?? "Selected day"} - ${sessionId ? activeSession?.title ?? "Selected session" : "Event gate"}`;
   const checkedInCount = useMemo(
     () => attendees.filter((attendee) => Boolean(attendee.checked_in_at)).length,
     [attendees],
@@ -120,8 +131,8 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
     });
   }, [attendeeFilter, attendeeListQuery, attendees]);
 
-  const loadAttendees = useCallback(async (targetEventId: string, targetSessionId: string) => {
-    if (!targetEventId) {
+  const loadAttendees = useCallback(async (targetEventId: string, targetEventDayId: string, targetSessionId: string) => {
+    if (!targetEventId || !targetEventDayId) {
       setAttendees([]);
       return;
     }
@@ -137,6 +148,7 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           eventId: targetEventId,
+          eventDayId: targetEventDayId,
           sessionId: targetSessionId || null,
         }),
       });
@@ -157,6 +169,11 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
   }, []);
 
   useEffect(() => {
+    if (eventDayId && filteredEventDays.some((day) => day.id === eventDayId)) return;
+    setEventDayId(filteredEventDays[0]?.id ?? "");
+  }, [eventDayId, filteredEventDays]);
+
+  useEffect(() => {
     if (sessionId && !filteredSessions.some((session) => session.id === sessionId)) {
       setSessionId("");
     }
@@ -173,13 +190,13 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
   }, [filteredTicketTypes]);
 
   useEffect(() => {
-    void loadAttendees(eventId, sessionId);
-  }, [eventId, loadAttendees, sessionId]);
+    void loadAttendees(eventId, eventDayId, sessionId);
+  }, [eventDayId, eventId, loadAttendees, sessionId]);
 
   const submitTicket = useCallback(
     (rawCode: string) => {
       const code = rawCode.trim();
-      if (!code || !eventId) return;
+      if (!code || !eventId || !eventDayId) return;
 
       startCheckInTransition(async () => {
         setStatusMessage(null);
@@ -188,6 +205,7 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             eventId,
+            eventDayId,
             sessionId: sessionId || null,
             ticketCode: code,
           }),
@@ -195,25 +213,26 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
         const data = (await response.json()) as CheckInResult;
         setResult(data);
         if (data.result === "success") {
-          await loadAttendees(eventId, sessionId);
+          await loadAttendees(eventId, eventDayId, sessionId);
         }
         if (!response.ok) {
           setStatusMessage(resultMessage(data.result));
         }
       });
     },
-    [eventId, loadAttendees, sessionId],
+    [eventDayId, eventId, loadAttendees, sessionId],
   );
 
   useEffect(() => {
     if (!cameraActive) return;
     const scanner = new Html5Qrcode(scannerId);
     let mounted = true;
+    const qrboxSize = Math.max(180, Math.min(260, window.innerWidth - 96));
 
     scanner
       .start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 260, height: 260 } },
+        { fps: 10, qrbox: { width: qrboxSize, height: qrboxSize } },
         (decodedText) => {
           if (!mounted) return;
           const code = decodedText.split("/").pop()?.trim() || decodedText.trim();
@@ -252,6 +271,7 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           eventId,
+          eventDayId,
           sessionId: sessionId || null,
           query,
         }),
@@ -283,6 +303,7 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
         body: JSON.stringify({
           ...walkUp,
           eventId,
+          eventDayId,
           sessionId: sessionId || null,
         }),
       });
@@ -296,12 +317,12 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
           ticketTypeId: walkUp.ticketTypeId,
           paymentMode: walkUp.paymentMode,
         });
-        await loadAttendees(eventId, sessionId);
+        await loadAttendees(eventId, eventDayId, sessionId);
       }
     });
   }
 
-  const canUseCheckIn = Boolean(eventId);
+  const canUseCheckIn = Boolean(eventId && eventDayId);
   const canAddWalkUp = canUseCheckIn && Boolean(walkUp.ticketTypeId);
 
   return (
@@ -311,20 +332,39 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
           <CardTitle>Check-in Context</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-3">
             <div className="space-y-2">
               <Label htmlFor="check-in-event">Event</Label>
               <SelectField
                 id="check-in-event"
                 value={eventId}
                 onChange={(event) => {
-                  setEventId(event.target.value);
+                  const nextEventId = event.target.value;
+                  setEventId(nextEventId);
+                  setEventDayId(eventDays.find((day) => day.event_id === nextEventId)?.id ?? "");
+                  setSessionId("");
                   setLookupResults([]);
                   setLookupMessage(null);
                   setAttendeeFilter("all");
                   setAttendeeListQuery("");
                 }}
                 options={events.map((event) => ({ label: event.title, value: event.id }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="check-in-day">Day</Label>
+              <SelectField
+                id="check-in-day"
+                value={eventDayId}
+                onChange={(event) => {
+                  setEventDayId(event.target.value);
+                  setSessionId("");
+                  setLookupResults([]);
+                  setLookupMessage(null);
+                  setAttendeeFilter("all");
+                  setAttendeeListQuery("");
+                }}
+                options={filteredEventDays.map((day) => ({ label: `${day.label} - ${new Date(day.starts_at).toLocaleDateString()}`, value: day.id }))}
               />
             </div>
             <div className="space-y-2">
@@ -340,7 +380,7 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
                   setAttendeeListQuery("");
                 }}
                 options={[
-                  { label: "Event-level check-in", value: "" },
+                  { label: "Event gate check-in", value: "" },
                   ...filteredSessions.map((session) => ({ label: session.title, value: session.id })),
                 ]}
               />
@@ -349,16 +389,16 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_0.8fr]">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)]">
         <div className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle>Scan Ticket</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex min-h-72 items-center justify-center rounded-lg border border-white/10 bg-black">
+              <div className="flex min-h-64 items-center justify-center rounded-lg border border-white/10 bg-black p-2 sm:min-h-72">
                 {cameraActive ? (
-                  <div id={scannerId} className="w-full max-w-md overflow-hidden rounded-lg" />
+                  <div id={scannerId} className="min-h-[220px] w-full max-w-md overflow-hidden rounded-lg" />
                 ) : (
                   <div className="text-center">
                     <Camera className="mx-auto h-10 w-10 text-[#e50913]" aria-hidden />
@@ -370,7 +410,7 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
                 )}
               </div>
 
-              <form className="grid gap-3 md:grid-cols-[1fr_auto]" onSubmit={handleTicketSubmit}>
+              <form className="grid gap-3 sm:grid-cols-[1fr_auto]" onSubmit={handleTicketSubmit}>
                 <div className="space-y-2">
                   <Label htmlFor="ticket-code">Ticket code</Label>
                   <Input
@@ -381,7 +421,7 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
                     autoComplete="off"
                   />
                 </div>
-                <Button className="self-end" type="submit" disabled={!ticketCode.trim() || !canUseCheckIn || isCheckingIn}>
+                <Button className="w-full self-end sm:w-auto" type="submit" disabled={!ticketCode.trim() || !canUseCheckIn || isCheckingIn}>
                   <Keyboard className="h-4 w-4" aria-hidden />
                   Check In
                 </Button>
@@ -401,7 +441,7 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
             scopeLabel={checkInScopeLabel}
             isRefreshing={isRefreshingAttendees}
             isCheckingIn={isCheckingIn}
-            onRefresh={() => void loadAttendees(eventId, sessionId)}
+            onRefresh={() => void loadAttendees(eventId, eventDayId, sessionId)}
             onCheckIn={(code) => {
               setTicketCode(code);
               submitTicket(code);
@@ -413,7 +453,7 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
               <CardTitle>Find Guest</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <form className="grid gap-3 md:grid-cols-[1fr_auto]" onSubmit={runLookup}>
+              <form className="grid gap-3 sm:grid-cols-[1fr_auto]" onSubmit={runLookup}>
                 <div className="space-y-2">
                   <Label htmlFor="guest-lookup">Guest lookup</Label>
                   <Input
@@ -424,7 +464,7 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
                     autoComplete="off"
                   />
                 </div>
-                <Button className="self-end" type="submit" variant="secondary" disabled={!canUseCheckIn || isSearching}>
+                <Button className="w-full self-end sm:w-auto" type="submit" variant="secondary" disabled={!canUseCheckIn || isSearching}>
                   <Search className="h-4 w-4" aria-hidden />
                   Search
                 </Button>
@@ -455,7 +495,7 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
             </CardHeader>
             <CardContent>
               <form className="space-y-4" onSubmit={createWalkUp}>
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="First name" htmlFor="walkup-first">
                     <Input
                       id="walkup-first"
@@ -547,7 +587,7 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
                     ) : (
                       <XCircle className="h-6 w-6" aria-hidden />
                     )}
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-sm opacity-80">Status</p>
                       <p className="text-2xl font-semibold capitalize text-white">{result.result.replaceAll("_", " ")}</p>
                     </div>
@@ -557,7 +597,7 @@ export function CheckInScanner({ events, sessions, ticketTypes, initialAttendees
                 {result.attendeeName ? <p className="text-lg font-medium text-white">{result.attendeeName}</p> : null}
                 {result.ticketTypeName ? <p className="text-sm text-[#999999]">{result.ticketTypeName}</p> : null}
                 {"ticketCode" in result && result.ticketCode ? (
-                  <p className="font-mono text-sm text-white">{result.ticketCode}</p>
+                  <p className="break-all font-mono text-sm text-white">{result.ticketCode}</p>
                 ) : null}
                 {result.checkedInAt ? <p className="text-sm text-[#999999]">Checked in at {formatDate(result.checkedInAt)}</p> : null}
                 {result.priorCheckedInAt ? (
@@ -616,15 +656,15 @@ function AttendeeCheckInList({
   return (
     <Card>
       <CardHeader>
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
+        <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0">
             <CardTitle>Attendee List</CardTitle>
             <p className="mt-1 text-sm text-[#999999]">{scopeLabel}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="success">{checkedInCount} checked in</Badge>
             <Badge variant="muted">{notCheckedInCount} not checked in</Badge>
-            <Button type="button" variant="outline" size="sm" onClick={onRefresh} disabled={isRefreshing}>
+            <Button type="button" variant="outline" size="sm" className="w-full min-[420px]:w-auto" onClick={onRefresh} disabled={isRefreshing}>
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} aria-hidden />
               Refresh
             </Button>
@@ -632,7 +672,7 @@ function AttendeeCheckInList({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
           <div>
             <Label htmlFor="attendee-list-filter" className="sr-only">
               Filter attendees
@@ -666,7 +706,18 @@ function AttendeeCheckInList({
 
         {totalCount ? (
           attendees.length ? (
-            <div className="overflow-x-auto">
+            <>
+            <div className="space-y-3 md:hidden">
+              {attendees.map((attendee) => (
+                <AttendeeMobileCard
+                  key={attendee.registration_id}
+                  attendee={attendee}
+                  isCheckingIn={isCheckingIn}
+                  onCheckIn={onCheckIn}
+                />
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-[820px] text-left text-sm">
                 <thead className="text-[#999999]">
                   <tr className="border-b border-white/10">
@@ -728,6 +779,7 @@ function AttendeeCheckInList({
                 </tbody>
               </table>
             </div>
+            </>
           ) : (
             <div className="rounded-md border border-white/10 px-4 py-8 text-sm text-[#999999]">
               No attendees match the current filters.
@@ -743,6 +795,71 @@ function AttendeeCheckInList({
   );
 }
 
+function AttendeeMobileCard({
+  attendee,
+  isCheckingIn,
+  onCheckIn,
+}: {
+  attendee: EventAttendeeSummary;
+  isCheckingIn: boolean;
+  onCheckIn: (ticketCode: string) => void;
+}) {
+  return (
+    <div className="rounded-md border border-white/10 bg-[#0b0b0b] p-3">
+      <div className="flex min-w-0 flex-col gap-3">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="font-medium text-white">{attendee.full_name}</p>
+            <p className="mt-1 text-sm text-[#999999]">{attendee.company ?? attendee.role_title ?? "No company listed"}</p>
+          </div>
+          {attendee.checked_in_at ? (
+            <Badge variant="success" className="shrink-0 gap-1">
+              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+              In
+            </Badge>
+          ) : (
+            <Badge variant="muted" className="shrink-0 gap-1">
+              <Clock3 className="h-3.5 w-3.5" aria-hidden />
+              Not in
+            </Badge>
+          )}
+        </div>
+
+        <div className="grid gap-2 text-sm text-[#999999]">
+          <div>
+            <p className="text-xs uppercase tracking-[0.12em] text-[#666666]">Ticket</p>
+            <p className="text-[#dddddd]">{attendee.ticket_type_name ?? "No ticket type"}</p>
+            <p className="break-all font-mono">{attendee.ticket_code ?? "No ticket issued"}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-[0.12em] text-[#666666]">Contact</p>
+            <p className="break-all">{attendee.email ?? "No email"}</p>
+            <p>{attendee.phone ?? "No phone"}</p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-[0.12em] text-[#666666]">Check-in</p>
+            <p>{attendee.checked_in_at ? formatDate(attendee.checked_in_at) : "Not checked in"}</p>
+          </div>
+        </div>
+
+        <Button
+          type="button"
+          size="sm"
+          variant={attendee.checked_in_at ? "outline" : "default"}
+          className="w-full"
+          disabled={!attendee.ticket_code || isCheckingIn}
+          onClick={() => {
+            if (attendee.ticket_code) onCheckIn(attendee.ticket_code);
+          }}
+        >
+          <TicketCheck className="h-4 w-4" aria-hidden />
+          {attendee.checked_in_at ? "Review" : "Check In"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function LookupRow({
   guest,
   onCheckIn,
@@ -753,7 +870,7 @@ function LookupRow({
   disabled: boolean;
 }) {
   return (
-    <div className="grid gap-3 rounded-md border border-white/10 bg-[#0b0b0b] p-3 md:grid-cols-[1fr_auto] md:items-center">
+    <div className="grid gap-3 rounded-md border border-white/10 bg-[#0b0b0b] p-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
       <div className="min-w-0 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-medium text-white">{guest.attendeeName}</p>
@@ -768,13 +885,13 @@ function LookupRow({
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[#999999]">
           {guest.attendeeEmail ? (
-            <span className="inline-flex items-center gap-1">
+            <span className="inline-flex min-w-0 items-center gap-1 break-all">
               <Mail className="h-3.5 w-3.5" aria-hidden />
               {guest.attendeeEmail}
             </span>
           ) : null}
           {guest.attendeePhone ? (
-            <span className="inline-flex items-center gap-1">
+            <span className="inline-flex min-w-0 items-center gap-1">
               <Phone className="h-3.5 w-3.5" aria-hidden />
               {guest.attendeePhone}
             </span>
@@ -784,7 +901,7 @@ function LookupRow({
           {guest.ticketTypeName ?? "Ticket"} <span className="font-mono text-[#999999]">{guest.ticketCode}</span>
         </p>
       </div>
-      <Button type="button" onClick={onCheckIn} disabled={disabled} variant={guest.checkedInAt ? "outline" : "default"}>
+      <Button type="button" onClick={onCheckIn} disabled={disabled} variant={guest.checkedInAt ? "outline" : "default"} className="w-full md:w-auto">
         <TicketCheck className="h-4 w-4" aria-hidden />
         {guest.checkedInAt ? "Review" : "Check In"}
       </Button>
@@ -820,6 +937,11 @@ function resultMessage(result: CheckInResult["result"]) {
     revoked: "This ticket has been revoked.",
     cancelled: "This ticket has been cancelled.",
     not_authorized: "You are not authorized to check in this event.",
+    unpaid: "This registration is not paid yet.",
+    not_confirmed: "This registration is not confirmed yet.",
+    not_entitled_for_day: "This ticket is not valid for this event day.",
+    not_entitled_for_session: "This ticket is not valid for this session.",
+    daily_check_in_required: "Daily event check-in is required before session check-in.",
   };
 
   return messages[result];

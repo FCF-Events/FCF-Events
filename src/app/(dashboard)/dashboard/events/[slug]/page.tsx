@@ -8,7 +8,7 @@ import { TicketTypeManager } from "@/components/ticket-type-manager";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { getEventAttendees, getEventBySlug, getSessions, getTicketTypes } from "@/lib/data";
+import { getEventAttendees, getEventBySlug, getEventDays, getSessions, getTicketTypes } from "@/lib/data";
 import { eventLocationLabel, googleMapsSearchUrl } from "@/lib/utils";
 
 export default async function EventDetailPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -16,7 +16,8 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
   const event = await getEventBySlug(slug);
   if (!event) notFound();
 
-  const [sessions, ticketTypes, attendees] = await Promise.all([
+  const [eventDays, sessions, ticketTypes, attendees] = await Promise.all([
+    getEventDays(event.id),
     getSessions(event.id),
     getTicketTypes(event.id),
     getEventAttendees(event.id),
@@ -110,10 +111,31 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
             <CardTitle>Ticket Types</CardTitle>
           </CardHeader>
           <CardContent>
-            <TicketTypeManager eventId={event.id} ticketTypes={ticketTypes} />
+            <TicketTypeManager eventId={event.id} eventDays={eventDays} ticketTypes={ticketTypes} />
           </CardContent>
         </Card>
       </div>
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>Event Days</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2">
+          {eventDays.length ? (
+            eventDays.map((day) => (
+              <div key={day.id} className="rounded-md border border-white/10 p-4">
+                <p className="font-medium text-white">{day.label}</p>
+                <p className="mt-1 text-sm text-[#999999]">
+                  {formatDateTime(day.starts_at)} - {formatDateTime(day.ends_at)}
+                </p>
+              </div>
+            ))
+          ) : (
+            <div className="rounded-md border border-dashed border-white/15 p-4 text-sm text-[#999999]">
+              Save this event to generate event days.
+            </div>
+          )}
+        </CardContent>
+      </Card>
       <Card id="edit-event" className="mt-4 scroll-mt-6">
         <CardHeader>
           <CardTitle>Edit Event</CardTitle>

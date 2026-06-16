@@ -22,10 +22,21 @@ export type EventSummary = {
   zeffy_form_url: string | null;
 };
 
+export type EventDaySummary = {
+  id: string;
+  organization_id: string;
+  event_id: string;
+  label: string;
+  starts_at: string;
+  ends_at: string;
+  sort_order: number;
+};
+
 export type SessionSummary = {
   id: string;
   organization_id: string;
   event_id: string;
+  event_day_id: string | null;
   title: string;
   slug: string;
   description: string;
@@ -37,11 +48,13 @@ export type SessionSummary = {
   type: string;
   requires_separate_check_in: boolean;
   requires_registration: boolean;
+  allowed_ticket_type_ids: string[];
   waitlist_enabled: boolean;
 };
 
 export type TicketTypeSummary = {
   id: string;
+  organization_id?: string;
   event_id: string;
   name: string;
   description: string;
@@ -49,6 +62,7 @@ export type TicketTypeSummary = {
   currency: string;
   capacity_limit: number | null;
   visibility: "public" | "private" | "hidden";
+  event_day_ids: string[];
 };
 
 export type DiscountType = "percentage" | "fixed_amount" | "comp" | "access_only";
@@ -98,7 +112,10 @@ export type EventAttendeeSummary = AttendeeSummary & {
   registered_at: string;
   ticket_code: string | null;
   ticket_status: TicketSummary["status"] | null;
+  ticket_type_id: string | null;
   ticket_type_name: string | null;
+  eligible_event_day_ids: string[];
+  planned_session_ids: string[];
   checked_in_at: string | null;
 };
 
@@ -256,7 +273,12 @@ export type CheckInResult = {
     | "wrong_event"
     | "revoked"
     | "cancelled"
-    | "not_authorized";
+    | "not_authorized"
+    | "unpaid"
+    | "not_confirmed"
+    | "not_entitled_for_day"
+    | "not_entitled_for_session"
+    | "daily_check_in_required";
   attendeeName?: string;
   ticketTypeName?: string;
   checkedInAt?: string;
@@ -271,6 +293,8 @@ export type CheckInLookupResult = {
   attendeeEmail: string | null;
   attendeePhone: string | null;
   ticketTypeName: string | null;
+  eligibleEventDayIds: string[];
+  plannedSessionIds: string[];
   checkedInAt: string | null;
 };
 

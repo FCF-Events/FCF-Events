@@ -14,16 +14,18 @@ import { PhoneInput } from "@/components/phone-input";
 import { SelectField } from "@/components/ui/select-field";
 import { registrationSchema } from "@/lib/validation";
 import { currency } from "@/lib/utils";
-import type { EventSummary, SessionSummary, TicketTypeSummary } from "@/lib/types";
+import type { EventDaySummary, EventSummary, SessionSummary, TicketTypeSummary } from "@/lib/types";
 
 type RegistrationValues = z.input<typeof registrationSchema>;
 
 export function RegistrationForm({
   event,
+  eventDays,
   ticketTypes,
   sessions,
 }: {
   event: EventSummary;
+  eventDays: EventDaySummary[];
   ticketTypes: TicketTypeSummary[];
   sessions: SessionSummary[];
 }) {
@@ -49,6 +51,9 @@ export function RegistrationForm({
       privacyAccepted: false,
     },
   });
+  const selectedTicketTypeId = form.watch("ticketTypeId");
+  const selectedTicketType = ticketTypes.find((ticketType) => ticketType.id === selectedTicketTypeId) ?? ticketTypes[0];
+  const selectedTicketDayIds = selectedTicketType?.event_day_ids ?? [];
 
   function onSubmit(values: RegistrationValues) {
     startTransition(async () => {
@@ -100,7 +105,7 @@ export function RegistrationForm({
               {...form.register("ticketTypeId")}
               options={ticketTypes.map((ticket) => ({
                 value: ticket.id,
-                label: `${ticket.name} - ${currency(ticket.price, ticket.currency)}`,
+                label: `${ticket.name} - ${currency(ticket.price, ticket.currency)}${ticket.event_day_ids.length ? ` - ${formatTicketDays(ticket, eventDays)}` : ""}`,
               }))}
             />
           </div>
@@ -108,17 +113,29 @@ export function RegistrationForm({
             <div className="rounded-md border border-white/10 p-4">
               <p className="text-sm font-medium text-white">Sessions</p>
               <div className="mt-3 space-y-2">
-                {sessions.map((session) => (
-                  <label key={session.id} className="flex items-center gap-3 text-sm text-[#dddddd]">
+                {sessions.map((session) => {
+                  const sessionTicketRestricted = session.allowed_ticket_type_ids.length > 0;
+                  const ticketAllowedForSession = !sessionTicketRestricted || session.allowed_ticket_type_ids.includes(selectedTicketTypeId);
+                  const dayAllowedForSession = !session.event_day_id || !selectedTicketDayIds.length || selectedTicketDayIds.includes(session.event_day_id);
+                  const disabled = !ticketAllowedForSession || !dayAllowedForSession;
+                  const dayLabel = session.event_day_id ? eventDays.find((day) => day.id === session.event_day_id)?.label : null;
+
+                  return (
+                  <label key={session.id} className={`flex items-center gap-3 text-sm ${disabled ? "text-[#666666]" : "text-[#dddddd]"}`}>
                     <input
                       type="checkbox"
                       value={session.id}
                       className="h-4 w-4 accent-[#e50913]"
+                      disabled={disabled}
                       {...form.register("sessionIds")}
                     />
-                    <span>{session.title}</span>
+                    <span>
+                      {session.title}
+                      {dayLabel ? <span className="ml-2 text-xs text-[#999999]">{dayLabel}</span> : null}
+                    </span>
                   </label>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : null}
@@ -183,4 +200,11 @@ function Field({ label, error, children }: { label: string; error?: string; chil
       {error ? <p className="text-sm text-red-300">{error}</p> : null}
     </div>
   );
+}
+
+function formatTicketDays(ticket: TicketTypeSummary, eventDays: EventDaySummary[]) {
+  if (!eventDays.length || ticket.event_day_ids.length === eventDays.length) return "All days";
+
+  const labelById = new Map(eventDays.map((day) => [day.id, day.label]));
+  return ticket.event_day_ids.map((dayId) => labelById.get(dayId)).filter(Boolean).join(", ");
 }

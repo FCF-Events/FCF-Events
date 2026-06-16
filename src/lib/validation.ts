@@ -20,11 +20,13 @@ export const registrationSchema = z.object({
 export const checkInSchema = z.object({
   ticketCode: z.string().min(4).max(120),
   eventId: z.string().uuid(),
+  eventDayId: z.string().uuid(),
   sessionId: z.string().uuid().optional().nullable(),
 });
 
 export const checkInLookupSchema = z.object({
   eventId: z.string().uuid(),
+  eventDayId: z.string().uuid(),
   sessionId: z.string().uuid().optional().nullable(),
   query: z.string().trim().min(2, "Enter at least 2 characters.").max(120),
 });
@@ -40,6 +42,7 @@ const optionalTextSchema = z.string().trim().max(120).optional().or(z.literal(""
 
 export const walkUpCheckInSchema = z.object({
   eventId: z.string().uuid(),
+  eventDayId: z.string().uuid(),
   sessionId: z.string().uuid().optional().nullable(),
   ticketTypeId: z.string().uuid(),
   firstName: z.string().trim().min(1, "First name is required.").max(80),
@@ -148,6 +151,7 @@ export const sessionTypeSchema = z.enum(["seminar", "panel", "keynote", "worksho
 
 const sessionBaseSchema = z.object({
   eventId: z.string().uuid(),
+  eventDayId: z.string().uuid().optional().or(z.literal("")),
   title: z.string().trim().min(2).max(160),
   slug: z
     .string()
@@ -164,6 +168,7 @@ const sessionBaseSchema = z.object({
   type: sessionTypeSchema.default("seminar"),
   requiresRegistration: z.boolean().default(false),
   requiresSeparateCheckIn: z.boolean().default(true),
+  allowedTicketTypeIds: z.array(z.string().uuid()).default([]),
   waitlistEnabled: z.boolean().default(false),
 });
 
@@ -195,6 +200,7 @@ const optionalPositiveIntegerSchema = z.preprocess((value) => {
 export const ticketTypeSchema = z.object({
   id: z.string().uuid().optional(),
   eventId: z.string().uuid(),
+  eventDayIds: z.array(z.string().uuid()).default([]),
   name: z.string().trim().min(2, "Ticket name is required.").max(120),
   description: z.string().trim().max(1000).optional().or(z.literal("")),
   price: z

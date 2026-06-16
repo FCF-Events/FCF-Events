@@ -6,7 +6,10 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint src next.config.ts postcss.config.mjs eslint.config.mjs"
+    "lint": "eslint src next.config.ts postcss.config.mjs eslint.config.mjs",
+    "mobile:checkin:start": "npm --prefix apps/admin-checkin run start",
+    "mobile:checkin:android": "npm --prefix apps/admin-checkin run android",
+    "mobile:checkin:typecheck": "npm --prefix apps/admin-checkin run typecheck"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",

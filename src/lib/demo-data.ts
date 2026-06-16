@@ -2,12 +2,14 @@ import type {
   AttendeeSummary,
   DashboardMetrics,
   DiscountCodeSummary,
+  EventDaySummary,
   EventSummary,
   SessionSummary,
   TicketTypeSummary,
 } from "@/lib/types";
 
 const now = Date.now();
+const dayMs = 1000 * 60 * 60 * 24;
 
 export const demoOrganizationId = "11111111-1111-4111-8111-111111111111";
 
@@ -18,7 +20,7 @@ export const demoEvents: EventSummary[] = [
     title: "FCF Cannabis Business Conference",
     slug: "fcf-business-conference",
     starts_at: new Date(now + 1000 * 60 * 60 * 24 * 30).toISOString(),
-    ends_at: new Date(now + 1000 * 60 * 60 * 24 * 30 + 1000 * 60 * 60 * 8).toISOString(),
+    ends_at: new Date(now + dayMs * 31 + 1000 * 60 * 60 * 8).toISOString(),
     timezone: "America/Toronto",
     venue_name: "Metro Toronto Convention Centre",
     address: "255 Front St W, Toronto, ON",
@@ -56,11 +58,33 @@ export const demoEvents: EventSummary[] = [
   },
 ];
 
+export const demoEventDays: EventDaySummary[] = [
+  {
+    id: "33333333-3333-4333-8333-333333333331",
+    organization_id: demoOrganizationId,
+    event_id: demoEvents[0].id,
+    label: "Day 1",
+    starts_at: demoEvents[0].starts_at,
+    ends_at: new Date(now + dayMs * 30 + 1000 * 60 * 60 * 8).toISOString(),
+    sort_order: 0,
+  },
+  {
+    id: "33333333-3333-4333-8333-333333333332",
+    organization_id: demoOrganizationId,
+    event_id: demoEvents[0].id,
+    label: "Day 2",
+    starts_at: new Date(now + dayMs * 31).toISOString(),
+    ends_at: demoEvents[0].ends_at,
+    sort_order: 1,
+  },
+];
+
 export const demoSessions: SessionSummary[] = [
   {
     id: "44444444-4444-4444-8444-444444444441",
     organization_id: demoOrganizationId,
     event_id: demoEvents[0].id,
+    event_day_id: demoEventDays[0].id,
     title: "Compliance Operations Panel",
     slug: "compliance-operations-panel",
     description: "Practical operations guardrails for Canadian cannabis events.",
@@ -72,23 +96,26 @@ export const demoSessions: SessionSummary[] = [
     type: "panel",
     requires_separate_check_in: true,
     requires_registration: true,
+    allowed_ticket_type_ids: [],
     waitlist_enabled: false,
   },
   {
     id: "44444444-4444-4444-8444-444444444442",
     organization_id: demoOrganizationId,
     event_id: demoEvents[0].id,
+    event_day_id: demoEventDays[1].id,
     title: "Retail Networking Seminar",
     slug: "retail-networking-seminar",
     description: "Structured networking for retailers and operators.",
-    starts_at: new Date(now + 1000 * 60 * 60 * 24 * 30 + 1000 * 60 * 60 * 4).toISOString(),
-    ends_at: new Date(now + 1000 * 60 * 60 * 24 * 30 + 1000 * 60 * 60 * 5).toISOString(),
+    starts_at: new Date(now + dayMs * 31 + 1000 * 60 * 60 * 2).toISOString(),
+    ends_at: new Date(now + dayMs * 31 + 1000 * 60 * 60 * 3).toISOString(),
     room: "Room 201",
     capacity: 120,
     status: "published",
     type: "networking",
     requires_separate_check_in: true,
     requires_registration: true,
+    allowed_ticket_type_ids: ["55555555-5555-4555-8555-555555555552"],
     waitlist_enabled: false,
   },
 ];
@@ -103,6 +130,7 @@ export const demoTicketTypes: TicketTypeSummary[] = [
     currency: "CAD",
     capacity_limit: 350,
     visibility: "public",
+    event_day_ids: [demoEventDays[0].id],
   },
   {
     id: "55555555-5555-4555-8555-555555555552",
@@ -113,6 +141,7 @@ export const demoTicketTypes: TicketTypeSummary[] = [
     currency: "CAD",
     capacity_limit: 75,
     visibility: "public",
+    event_day_ids: demoEventDays.map((day) => day.id),
   },
 ];
 

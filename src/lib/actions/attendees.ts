@@ -142,29 +142,51 @@ export async function updateAttendeeRegistrationEventAction(input: FormData): Pr
   }
 
   let amountDue: number | null = null;
+  let ticketAllowedEventDayIds: string[] = [];
   if (ticketTypeId) {
-    const { data: ticketType, error: ticketTypeError } = await supabase
-      .from("ticket_types")
-      .select("id, event_id, price")
-      .eq("id", ticketTypeId)
-      .eq("event_id", values.eventId)
-      .maybeSingle();
+    const [{ data: ticketType, error: ticketTypeError }, { data: eventDays }, { data: accessRows }] = await Promise.all([
+      supabase
+        .from("ticket_types")
+        .select("id, event_id, price")
+        .eq("id", ticketTypeId)
+        .eq("event_id", values.eventId)
+        .maybeSingle(),
+      supabase.from("event_days").select("id").eq("event_id", values.eventId).order("sort_order"),
+      supabase.from("ticket_type_day_access").select("event_day_id").eq("ticket_type_id", ticketTypeId),
+    ]);
 
     if (ticketTypeError) return { ok: false, message: ticketTypeError.message };
     if (!ticketType) return { ok: false, message: "Choose a ticket type that belongs to the selected event." };
     amountDue = Number(ticketType.price ?? 0);
+    ticketAllowedEventDayIds = (accessRows ?? []).length
+      ? (accessRows ?? []).map((row) => row.event_day_id as string)
+      : (eventDays ?? []).map((day) => day.id as string);
+  } else {
+    const { data: eventDays } = await supabase.from("event_days").select("id").eq("event_id", values.eventId).order("sort_order");
+    ticketAllowedEventDayIds = (eventDays ?? []).map((day) => day.id as string);
   }
 
   if (sessionIds.length) {
     const { data: matchingSessions, error: sessionError } = await supabase
       .from("sessions")
-      .select("id")
+      .select("id, event_day_id, allowed_ticket_type_ids")
       .eq("event_id", values.eventId)
       .in("id", sessionIds);
 
     if (sessionError) return { ok: false, message: sessionError.message };
     if ((matchingSessions ?? []).length !== sessionIds.length) {
       return { ok: false, message: "Selected sessions must belong to the selected event." };
+    }
+
+    for (const session of matchingSessions ?? []) {
+      const sessionDayId = session.event_day_id as string | null;
+      const allowedTicketTypeIds = (session.allowed_ticket_type_ids ?? []) as string[];
+      if (sessionDayId && !ticketAllowedEventDayIds.includes(sessionDayId)) {
+        return { ok: false, message: "The selected ticket type does not include one or more selected sessions." };
+      }
+      if (allowedTicketTypeIds.length && (!ticketTypeId || !allowedTicketTypeIds.includes(ticketTypeId))) {
+        return { ok: false, message: "The selected ticket type is not eligible for one or more selected sessions." };
+      }
     }
   }
 

@@ -84,19 +84,33 @@ export async function createEventAction(input: FormData) {
 
   if (error) return { ok: false, message: error.message };
 
+  const eventDays = await ensureEventDaysForEvent(supabase, {
+    eventId: data.id,
+    organizationId: demoOrganizationId,
+    startsAt: values.startsAt,
+    endsAt: values.endsAt,
+  });
+
   if (ticketTypeValues.length) {
-    const { error: ticketTypeError } = await supabase.from("ticket_types").insert(
+    const { data: createdTicketTypes, error: ticketTypeError } = await supabase.from("ticket_types").insert(
       ticketTypeValues.map((ticketType) => ({
         organization_id: demoOrganizationId,
         event_id: data.id,
         ...toTicketTypePayload(ticketType),
       })),
-    );
+    ).select("id");
 
     if (ticketTypeError) {
       await supabase.from("events").delete().eq("id", data.id).eq("organization_id", demoOrganizationId);
       return { ok: false, message: ticketTypeError.message };
     }
+
+    await setTicketTypesDefaultDayAccess({
+      supabase,
+      organizationId: demoOrganizationId,
+      ticketTypeIds: (createdTicketTypes ?? []).map((ticketType) => ticketType.id as string),
+      eventDayIds: eventDays.map((day) => day.id),
+    });
   }
 
   const syncResult = values.zeffyFormUrl
@@ -194,6 +208,13 @@ export async function updateEventAction(input: FormData) {
     .eq("id", values.eventId);
 
   if (error) return { ok: false, message: error.message };
+
+  await ensureEventDaysForEvent(supabase, {
+    eventId: existingEvent.id,
+    organizationId: existingEvent.organization_id,
+    startsAt: values.startsAt,
+    endsAt: values.endsAt,
+  });
 
   const syncResult = values.zeffyFormUrl
     ? await syncZeffyTicketTypes({
@@ -323,6 +344,14 @@ export async function createTicketTypeAction(input: FormData): Promise<ActionRes
 
   if (error) return { ok: false, message: error.message };
 
+  await replaceTicketTypeDayAccess({
+    supabase,
+    organizationId: event.organization_id,
+    eventId: event.id,
+    ticketTypeId: data.id,
+    eventDayIds: values.eventDayIds,
+  });
+
   await writeAuditLog({
     organizationId: event.organization_id,
     actorUserId: access.userId ?? undefined,
@@ -373,6 +402,14 @@ export async function updateTicketTypeAction(input: FormData): Promise<ActionRes
   if (error) return { ok: false, message: error.message };
   if (!data) return { ok: false, message: "Ticket type not found." };
 
+  await replaceTicketTypeDayAccess({
+    supabase,
+    organizationId: event.organization_id,
+    eventId: event.id,
+    ticketTypeId: data.id,
+    eventDayIds: values.eventDayIds,
+  });
+
   await writeAuditLog({
     organizationId: event.organization_id,
     actorUserId: access.userId ?? undefined,
@@ -398,6 +435,7 @@ function readTicketTypeForm(input: FormData, options?: { requireId?: boolean }) 
     currency: input.get("currency") || "CAD",
     capacityLimit: input.get("capacityLimit"),
     visibility: input.get("visibility"),
+    eventDayIds: input.getAll("eventDayIds").map((value) => String(value)),
   };
 }
 
@@ -490,6 +528,7 @@ async function syncZeffyTicketTypes({
       inserted += 1;
     }
 
+    await ensureTicketTypesHaveDefaultDayAccess({ supabase, eventId, organizationId });
     return { synced: inserted + updated, inserted, updated };
   } catch (error) {
     return {
@@ -499,6 +538,162 @@ async function syncZeffyTicketTypes({
       error: error instanceof Error ? error.message : "Could not sync Zeffy ticket prices.",
     };
   }
+}
+
+type EventDayRow = {
+  id: string;
+  label: string;
+  starts_at: string;
+  ends_at: string;
+  sort_order: number;
+};
+
+async function ensureEventDaysForEvent(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  values: { eventId: string; organizationId: string; startsAt: string; endsAt: string },
+): Promise<EventDayRow[]> {
+  const drafts = buildEventDayDrafts(values.startsAt, values.endsAt);
+  const { data: existingDays } = await supabase
+    .from("event_days")
+    .select("id, label, sort_order")
+    .eq("event_id", values.eventId)
+    .order("sort_order");
+  const existingBySortOrder = new Map((existingDays ?? []).map((day) => [day.sort_order as number, day]));
+
+  const { data, error } = await supabase
+    .from("event_days")
+    .upsert(
+      drafts.map((day) => ({
+        organization_id: values.organizationId,
+        event_id: values.eventId,
+        label: String(existingBySortOrder.get(day.sortOrder)?.label ?? `Day ${day.sortOrder + 1}`),
+        starts_at: day.startsAt,
+        ends_at: day.endsAt,
+        sort_order: day.sortOrder,
+      })),
+      { onConflict: "event_id,sort_order" },
+    )
+    .select("id, label, starts_at, ends_at, sort_order")
+    .order("sort_order");
+
+  if (error) throw new Error(error.message);
+  return (data ?? []) as EventDayRow[];
+}
+
+function buildEventDayDrafts(startsAt: string, endsAt: string) {
+  const starts = new Date(startsAt);
+  const ends = new Date(endsAt);
+  if (Number.isNaN(starts.getTime()) || Number.isNaN(ends.getTime()) || ends <= starts) {
+    return [{ startsAt, endsAt, sortOrder: 0 }];
+  }
+
+  const firstDayUtc = Date.UTC(starts.getUTCFullYear(), starts.getUTCMonth(), starts.getUTCDate());
+  const lastDayUtc = Date.UTC(ends.getUTCFullYear(), ends.getUTCMonth(), ends.getUTCDate());
+  const dayMs = 24 * 60 * 60 * 1000;
+  const dayCount = Math.max(1, Math.round((lastDayUtc - firstDayUtc) / dayMs) + 1);
+
+  return Array.from({ length: dayCount }, (_, index) => {
+    const dayStart = new Date(firstDayUtc + index * dayMs);
+    const nextDayStart = new Date(firstDayUtc + (index + 1) * dayMs);
+    const draftStarts = index === 0 ? starts : dayStart;
+    const draftEnds = index === dayCount - 1 ? ends : nextDayStart;
+
+    return {
+      startsAt: draftStarts.toISOString(),
+      endsAt: draftEnds.toISOString(),
+      sortOrder: index,
+    };
+  }).filter((day) => new Date(day.endsAt) > new Date(day.startsAt));
+}
+
+async function getEventDayIds(supabase: ReturnType<typeof createSupabaseAdminClient>, eventId: string) {
+  const { data } = await supabase.from("event_days").select("id").eq("event_id", eventId).order("sort_order");
+  return (data ?? []).map((day) => day.id as string);
+}
+
+async function replaceTicketTypeDayAccess({
+  supabase,
+  organizationId,
+  eventId,
+  ticketTypeId,
+  eventDayIds,
+}: {
+  supabase: ReturnType<typeof createSupabaseAdminClient>;
+  organizationId: string;
+  eventId: string;
+  ticketTypeId: string;
+  eventDayIds: string[];
+}) {
+  const fallbackDayIds = await getEventDayIds(supabase, eventId);
+  const dayIds = eventDayIds.length ? eventDayIds : fallbackDayIds;
+
+  await supabase.from("ticket_type_day_access").delete().eq("ticket_type_id", ticketTypeId);
+
+  if (dayIds.length) {
+    await supabase.from("ticket_type_day_access").insert(
+      dayIds.map((eventDayId) => ({
+        organization_id: organizationId,
+        ticket_type_id: ticketTypeId,
+        event_day_id: eventDayId,
+      })),
+    );
+  }
+}
+
+async function setTicketTypesDefaultDayAccess({
+  supabase,
+  organizationId,
+  ticketTypeIds,
+  eventDayIds,
+}: {
+  supabase: ReturnType<typeof createSupabaseAdminClient>;
+  organizationId: string;
+  ticketTypeIds: string[];
+  eventDayIds: string[];
+}) {
+  if (!ticketTypeIds.length || !eventDayIds.length) return;
+
+  await supabase.from("ticket_type_day_access").insert(
+    ticketTypeIds.flatMap((ticketTypeId) =>
+      eventDayIds.map((eventDayId) => ({
+        organization_id: organizationId,
+        ticket_type_id: ticketTypeId,
+        event_day_id: eventDayId,
+      })),
+    ),
+  );
+}
+
+async function ensureTicketTypesHaveDefaultDayAccess({
+  supabase,
+  eventId,
+  organizationId,
+}: {
+  supabase: ReturnType<typeof createSupabaseAdminClient>;
+  eventId: string;
+  organizationId: string;
+}) {
+  const [{ data: ticketTypes }, eventDayIdsResult] = await Promise.all([
+    supabase.from("ticket_types").select("id").eq("event_id", eventId).eq("organization_id", organizationId),
+    getEventDayIds(supabase, eventId),
+  ]);
+  const eventDayIds = eventDayIdsResult;
+  const ticketTypeIds = (ticketTypes ?? []).map((ticketType) => ticketType.id as string);
+  if (!ticketTypeIds.length || !eventDayIds.length) return;
+
+  const { data: accessRows } = await supabase
+    .from("ticket_type_day_access")
+    .select("ticket_type_id")
+    .in("ticket_type_id", ticketTypeIds);
+  const ticketTypesWithAccess = new Set((accessRows ?? []).map((access) => access.ticket_type_id as string));
+  const missingTicketTypeIds = ticketTypeIds.filter((ticketTypeId) => !ticketTypesWithAccess.has(ticketTypeId));
+
+  await setTicketTypesDefaultDayAccess({
+    supabase,
+    organizationId,
+    ticketTypeIds: missingTicketTypeIds,
+    eventDayIds,
+  });
 }
 
 function toZeffyTicketTypePayload(offer: ZeffyTicketOffer) {

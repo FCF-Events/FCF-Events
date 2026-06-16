@@ -167,10 +167,25 @@ create table public.event_staff_assignments (
   unique (event_id, user_id)
 );
 
+create table public.event_days (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  event_id uuid not null references public.events(id) on delete cascade,
+  label text not null,
+  starts_at timestamptz not null,
+  ends_at timestamptz not null,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint event_day_dates_valid check (ends_at > starts_at),
+  unique (event_id, sort_order)
+);
+
 create table public.sessions (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
   event_id uuid not null references public.events(id) on delete cascade,
+  event_day_id uuid references public.event_days(id) on delete set null,
   title text not null,
   slug text not null,
   description text not null default '',
@@ -213,6 +228,16 @@ create table public.ticket_types (
   payment_method payment_method not null default 'manual',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table public.ticket_type_day_access (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  ticket_type_id uuid not null references public.ticket_types(id) on delete cascade,
+  event_day_id uuid not null references public.event_days(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (ticket_type_id, event_day_id)
 );
 
 create table public.discount_codes (
@@ -364,6 +389,7 @@ create table public.attendance_logs (
   registration_id uuid not null references public.registrations(id) on delete cascade,
   attendee_id uuid not null references public.attendees(id) on delete restrict,
   event_id uuid not null references public.events(id) on delete cascade,
+  event_day_id uuid references public.event_days(id) on delete cascade,
   session_id uuid references public.sessions(id) on delete cascade,
   scope attendance_scope not null default 'event',
   checked_in_by uuid references auth.users(id) on delete set null,
@@ -372,18 +398,25 @@ create table public.attendance_logs (
   created_at timestamptz not null default now()
 );
 
-create unique index attendance_once_per_scope_idx
-on public.attendance_logs (ticket_id, event_id, coalesce(session_id, '00000000-0000-0000-0000-000000000000'::uuid), scope);
+create unique index attendance_once_per_day_scope_idx
+on public.attendance_logs (
+  ticket_id,
+  event_id,
+  coalesce(event_day_id, '00000000-0000-0000-0000-000000000000'::uuid),
+  coalesce(session_id, '00000000-0000-0000-0000-000000000000'::uuid),
+  scope
+);
 
 create table public.check_in_attempts (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid references public.organizations(id) on delete cascade,
   ticket_id uuid references public.tickets(id) on delete set null,
   event_id uuid references public.events(id) on delete set null,
+  event_day_id uuid references public.event_days(id) on delete set null,
   session_id uuid references public.sessions(id) on delete set null,
   attempted_by uuid references auth.users(id) on delete set null,
   attempted_code text,
-  result text not null check (result in ('success','duplicate','invalid','wrong_event','revoked','cancelled','not_authorized')),
+  result text not null check (result in ('success','duplicate','invalid','wrong_event','revoked','cancelled','not_authorized','unpaid','not_confirmed','not_entitled_for_day','not_entitled_for_session','daily_check_in_required')),
   metadata jsonb not null default '{}'::jsonb,
   ip_address inet,
   user_agent text,
@@ -729,7 +762,7 @@ declare
 begin
   foreach t in array array[
     'organizations','user_profiles','organization_members','venues','events','event_staff_assignments',
-    'sessions','ticket_types','discount_codes','discount_redemptions','registration_forms',
+    'event_days','sessions','ticket_types','ticket_type_day_access','discount_codes','discount_redemptions','registration_forms',
     'registration_form_fields','attendees','attendee_identities','registrations','registration_sessions',
     'tickets','twilio_configs','sms_templates','reminder_schedules','message_campaigns','message_sends',
     'email_templates','email_sends','airtable_configs'
@@ -743,7 +776,7 @@ declare
   t text;
 begin
   foreach t in array array[
-    'organizations','user_profiles','organization_members','venues','events','sessions','ticket_types',
+    'organizations','user_profiles','organization_members','venues','events','event_days','sessions','ticket_types','ticket_type_day_access',
     'discount_codes','registration_forms','registration_form_fields','attendees','attendee_identities',
     'registrations','registration_sessions','tickets','attendance_logs','check_in_attempts','twilio_configs',
     'sms_consents','sms_templates','reminder_schedules','message_campaigns','message_sends',
@@ -780,6 +813,14 @@ with check (public.has_org_role(organization_id, array['owner']::app_role[]));
 create policy "public read published events" on public.events
 for select using (status = 'published' and visibility in ('public','unlisted'));
 
+create policy "public read published event days" on public.event_days
+for select using (
+  exists (
+    select 1 from public.events e
+    where e.id = event_days.event_id and e.status = 'published' and e.visibility in ('public','unlisted')
+  )
+);
+
 create policy "public read published sessions" on public.sessions
 for select using (
   exists (
@@ -797,6 +838,19 @@ for select using (
   )
 );
 
+create policy "public read available ticket day access" on public.ticket_type_day_access
+for select using (
+  exists (
+    select 1
+    from public.ticket_types tt
+    join public.events e on e.id = tt.event_id
+    where tt.id = ticket_type_day_access.ticket_type_id
+      and tt.visibility = 'public'
+      and e.status = 'published'
+      and e.visibility in ('public','unlisted')
+  )
+);
+
 create policy "members read org rows venues" on public.venues
 for select using (public.has_org_role(organization_id, array['owner','admin','manager','check_in_staff','viewer']::app_role[]));
 create policy "staff manage org rows venues" on public.venues
@@ -806,6 +860,12 @@ with check (public.has_org_role(organization_id, array['owner','admin','manager'
 create policy "members read events" on public.events
 for select using (public.has_org_role(organization_id, array['owner','admin','manager','check_in_staff','viewer']::app_role[]));
 create policy "staff manage events" on public.events
+for all using (public.has_org_role(organization_id, array['owner','admin','manager']::app_role[]))
+with check (public.has_org_role(organization_id, array['owner','admin','manager']::app_role[]));
+
+create policy "members read event days" on public.event_days
+for select using (public.has_org_role(organization_id, array['owner','admin','manager','check_in_staff','viewer']::app_role[]));
+create policy "staff manage event days" on public.event_days
 for all using (public.has_org_role(organization_id, array['owner','admin','manager']::app_role[]))
 with check (public.has_org_role(organization_id, array['owner','admin','manager']::app_role[]));
 
@@ -824,6 +884,12 @@ with check (public.has_org_role(organization_id, array['owner','admin']::app_rol
 create policy "members read ticket types" on public.ticket_types
 for select using (public.has_org_role(organization_id, array['owner','admin','manager','check_in_staff','viewer']::app_role[]));
 create policy "staff manage ticket types" on public.ticket_types
+for all using (public.has_org_role(organization_id, array['owner','admin','manager']::app_role[]))
+with check (public.has_org_role(organization_id, array['owner','admin','manager']::app_role[]));
+
+create policy "members read ticket day access" on public.ticket_type_day_access
+for select using (public.has_org_role(organization_id, array['owner','admin','manager','check_in_staff','viewer']::app_role[]));
+create policy "staff manage ticket day access" on public.ticket_type_day_access
 for all using (public.has_org_role(organization_id, array['owner','admin','manager']::app_role[]))
 with check (public.has_org_role(organization_id, array['owner','admin','manager']::app_role[]));
 
@@ -886,7 +952,10 @@ end $$;
 
 create index events_org_status_start_idx on public.events (organization_id, status, starts_at);
 create index events_zeffy_campaign_idx on public.events (zeffy_campaign_id) where zeffy_campaign_id is not null;
+create index event_days_event_sort_idx on public.event_days (event_id, sort_order);
 create index sessions_event_start_idx on public.sessions (event_id, starts_at);
+create index sessions_event_day_idx on public.sessions (event_day_id, starts_at);
+create index ticket_type_day_access_day_idx on public.ticket_type_day_access (event_day_id);
 create index registrations_event_status_idx on public.registrations (event_id, status);
 create index registrations_external_payment_idx on public.registrations (external_payment_provider, external_payment_id) where external_payment_id is not null;
 create index tickets_event_code_idx on public.tickets (event_id, ticket_code);
@@ -928,11 +997,27 @@ insert into public.events (
   'ops@example.com'
 ) on conflict (organization_id, slug) do nothing;
 
+insert into public.event_days (id, organization_id, event_id, label, starts_at, ends_at, sort_order)
+values (
+  '33333333-3333-4333-8333-333333333331',
+  '11111111-1111-4111-8111-111111111111',
+  '33333333-3333-4333-8333-333333333333',
+  'Day 1',
+  now() + interval '30 days',
+  now() + interval '30 days 8 hours',
+  0
+) on conflict (event_id, sort_order) do nothing;
+
 insert into public.sessions (id, organization_id, event_id, title, slug, description, speakers, room, starts_at, ends_at, capacity, status, type, requires_registration)
 values
 ('44444444-4444-4444-8444-444444444441','11111111-1111-4111-8111-111111111111','33333333-3333-4333-8333-333333333333','Compliance Operations Panel','compliance-operations-panel','Practical operations guardrails for Canadian cannabis events.',array['A. Morgan','S. Patel'],'Stage A',now() + interval '30 days 2 hours',now() + interval '30 days 3 hours',150,'published','panel',true),
 ('44444444-4444-4444-8444-444444444442','11111111-1111-4111-8111-111111111111','33333333-3333-4333-8333-333333333333','Retail Networking Seminar','retail-networking-seminar','Structured networking for retailers and operators.',array['J. Chen'],'Room 201',now() + interval '30 days 4 hours',now() + interval '30 days 5 hours',120,'published','networking',true)
 on conflict (event_id, slug) do nothing;
+
+update public.sessions
+set event_day_id = '33333333-3333-4333-8333-333333333331'
+where event_id = '33333333-3333-4333-8333-333333333333'
+  and event_day_id is null;
 
 insert into public.ticket_types (id, organization_id, event_id, name, description, price, currency, capacity_limit, visibility, payment_method)
 values
@@ -940,6 +1025,13 @@ values
 ('55555555-5555-4555-8555-555555555552','11111111-1111-4111-8111-111111111111','33333333-3333-4333-8333-333333333333','VIP','Includes VIP networking access.',249,'CAD',75,'public','manual'),
 ('55555555-5555-4555-8555-555555555553','11111111-1111-4111-8111-111111111111','33333333-3333-4333-8333-333333333333','Speaker','Speaker and moderator access.',0,'CAD',50,'hidden','comped')
 on conflict do nothing;
+
+insert into public.ticket_type_day_access (organization_id, ticket_type_id, event_day_id)
+values
+('11111111-1111-4111-8111-111111111111','55555555-5555-4555-8555-555555555551','33333333-3333-4333-8333-333333333331'),
+('11111111-1111-4111-8111-111111111111','55555555-5555-4555-8555-555555555552','33333333-3333-4333-8333-333333333331'),
+('11111111-1111-4111-8111-111111111111','55555555-5555-4555-8555-555555555553','33333333-3333-4333-8333-333333333331')
+on conflict (ticket_type_id, event_day_id) do nothing;
 
 insert into public.sms_templates (organization_id, name, purpose, body, is_default)
 values (

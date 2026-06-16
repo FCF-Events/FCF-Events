@@ -5,7 +5,7 @@ import { useTransition, type FormEvent } from "react";
 import { Plus, Save } from "lucide-react";
 import { toast } from "sonner";
 import { createTicketTypeAction, updateTicketTypeAction } from "@/lib/actions/events";
-import type { TicketTypeSummary } from "@/lib/types";
+import type { EventDaySummary, TicketTypeSummary } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,9 +19,11 @@ const visibilityOptions = [
 
 export function TicketTypeManager({
   eventId,
+  eventDays,
   ticketTypes,
 }: {
   eventId: string;
+  eventDays: EventDaySummary[];
   ticketTypes: TicketTypeSummary[];
 }) {
   const router = useRouter();
@@ -86,6 +88,9 @@ export function TicketTypeManager({
                   <SelectField name="visibility" defaultValue={ticket.visibility} options={visibilityOptions} />
                 </Field>
               </div>
+              {eventDays.length ? (
+                <DayAccessField eventDays={eventDays} selectedDayIds={ticket.event_day_ids} />
+              ) : null}
               <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
                 <Field label="Description">
                   <Input name="description" defaultValue={ticket.description} />
@@ -124,6 +129,9 @@ export function TicketTypeManager({
             <SelectField name="visibility" defaultValue="public" options={visibilityOptions} />
           </Field>
         </div>
+        {eventDays.length ? (
+          <DayAccessField eventDays={eventDays} selectedDayIds={eventDays.map((day) => day.id)} />
+        ) : null}
         <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
           <Field label="Description">
             <Input name="description" placeholder="Optional" />
@@ -138,6 +146,31 @@ export function TicketTypeManager({
   );
 }
 
+function DayAccessField({ eventDays, selectedDayIds }: { eventDays: EventDaySummary[]; selectedDayIds: string[] }) {
+  return (
+    <div className="mt-3">
+      <p className="text-sm font-medium text-[#dddddd]">Included days</p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {eventDays.map((day) => (
+          <label key={day.id} className="flex items-start gap-3 rounded-md border border-white/10 px-3 py-2 text-sm text-[#dddddd]">
+            <input
+              type="checkbox"
+              name="eventDayIds"
+              value={day.id}
+              defaultChecked={!selectedDayIds.length || selectedDayIds.includes(day.id)}
+              className="mt-0.5 h-4 w-4 rounded border-white/20 accent-[#e50913]"
+            />
+            <span>
+              <span className="block text-white">{day.label}</span>
+              <span className="text-xs text-[#999999]">{formatDayRange(day)}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-2">
@@ -145,4 +178,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
+}
+
+function formatDayRange(day: EventDaySummary) {
+  return `${new Date(day.starts_at).toLocaleDateString()} - ${new Date(day.ends_at).toLocaleDateString()}`;
 }

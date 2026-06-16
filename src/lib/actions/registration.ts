@@ -67,6 +67,40 @@ export async function registerForEvent(input: unknown): Promise<RegistrationResu
     return { ok: false, message: "Payment is not configured for this event yet." };
   }
 
+  const [{ data: eventDays }, { data: dayAccessRows }, { data: requestedSessions }] = await Promise.all([
+    supabase.from("event_days").select("id").eq("event_id", values.eventId).order("sort_order"),
+    supabase
+      .from("ticket_type_day_access")
+      .select("event_day_id")
+      .eq("ticket_type_id", values.ticketTypeId),
+    values.sessionIds.length
+      ? supabase
+          .from("sessions")
+          .select("id, event_day_id, allowed_ticket_type_ids")
+          .eq("event_id", values.eventId)
+          .in("id", values.sessionIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+  const allEventDayIds = (eventDays ?? []).map((day) => day.id as string);
+  const allowedEventDayIds = (dayAccessRows ?? []).length
+    ? (dayAccessRows ?? []).map((row) => row.event_day_id as string)
+    : allEventDayIds;
+
+  if (values.sessionIds.length && (requestedSessions ?? []).length !== values.sessionIds.length) {
+    return { ok: false, message: "One or more selected sessions are not available." };
+  }
+
+  for (const session of requestedSessions ?? []) {
+    const sessionDayId = session.event_day_id as string | null;
+    const allowedTicketTypeIds = (session.allowed_ticket_type_ids ?? []) as string[];
+    if (sessionDayId && !allowedEventDayIds.includes(sessionDayId)) {
+      return { ok: false, message: "Your selected ticket does not include one or more selected sessions." };
+    }
+    if (allowedTicketTypeIds.length && !allowedTicketTypeIds.includes(values.ticketTypeId)) {
+      return { ok: false, message: "Your selected ticket is not eligible for one or more selected sessions." };
+    }
+  }
+
   const normalizedEmail = values.email.toLowerCase().trim();
   const { data: existingAttendee } = await supabase
     .from("attendees")

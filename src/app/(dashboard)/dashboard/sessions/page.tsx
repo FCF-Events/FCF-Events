@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { SelectField } from "@/components/ui/select-field";
 import { Textarea } from "@/components/ui/textarea";
 import { updateSessionAction } from "@/lib/actions/sessions";
-import { getEvents, getSessions } from "@/lib/data";
+import { getEventDays, getEvents, getSessions, getTicketTypes } from "@/lib/data";
 import { toDateTimeLocalInputValue } from "@/lib/utils";
 
 const statusOptions = [
@@ -30,9 +30,20 @@ const sessionTypeOptions = [
 ];
 
 export default async function SessionsPage() {
-  const [events, sessions] = await Promise.all([getEvents(), getSessions()]);
+  const [events, eventDays, sessions, ticketTypes] = await Promise.all([getEvents(), getEventDays(), getSessions(), getTicketTypes()]);
   const eventOptions = events.map((event) => ({ label: event.title, value: event.id }));
   const eventTitleById = new Map(events.map((event) => [event.id, event.title]));
+  const eventDayOptionsByEventId = new Map(
+    events.map((event) => [
+      event.id,
+      eventDays
+        .filter((day) => day.event_id === event.id)
+        .map((day) => ({ label: `${day.label} - ${new Date(day.starts_at).toLocaleDateString()}`, value: day.id })),
+    ]),
+  );
+  const ticketTypesByEventId = new Map(
+    events.map((event) => [event.id, ticketTypes.filter((ticketType) => ticketType.event_id === event.id)]),
+  );
 
   async function updateSession(formData: FormData) {
     "use server";
@@ -84,6 +95,16 @@ export default async function SessionsPage() {
                       <Field label="Event">
                         <SelectField name="eventId" defaultValue={session.event_id} options={eventOptions} />
                       </Field>
+                      <Field label="Event day">
+                        <SelectField
+                          name="eventDayId"
+                          defaultValue={session.event_day_id ?? ""}
+                          options={[
+                            { label: "No day assigned", value: "" },
+                            ...(eventDayOptionsByEventId.get(session.event_id) ?? []),
+                          ]}
+                        />
+                      </Field>
                       <Field label="Room">
                         <Input name="room" defaultValue={session.room ?? ""} />
                       </Field>
@@ -118,6 +139,24 @@ export default async function SessionsPage() {
                         defaultChecked={session.requires_separate_check_in}
                       />
                       <CheckboxField label="Waitlist enabled" name="waitlistEnabled" defaultChecked={session.waitlist_enabled} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-[#dddddd]">Allowed ticket types</p>
+                      <div className="mt-2 grid gap-2 md:grid-cols-2">
+                        {(ticketTypesByEventId.get(session.event_id) ?? []).map((ticketType) => (
+                          <label key={ticketType.id} className="flex items-start gap-3 rounded-md border border-white/10 bg-[#0b0b0b] px-3 py-2 text-sm text-[#dddddd]">
+                            <input
+                              type="checkbox"
+                              name="allowedTicketTypeIds"
+                              value={ticketType.id}
+                              defaultChecked={session.allowed_ticket_type_ids.includes(ticketType.id)}
+                              className="mt-0.5 h-4 w-4 rounded border-white/20 bg-[#111111] accent-[#e50913]"
+                            />
+                            <span>{ticketType.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-xs text-[#999999]">Leave all unchecked to allow every ticket type with access to the selected day.</p>
                     </div>
                     <Button type="submit">
                       <Save className="h-4 w-4" aria-hidden />
