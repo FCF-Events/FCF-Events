@@ -1,4 +1,4 @@
-import { Save } from "lucide-react";
+import { ChevronDown, Pencil, Save } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -43,75 +43,89 @@ export default async function SessionsPage() {
     <>
       <PageHeader eyebrow="Agenda" title="Sessions" description="Edit seminars, panels, workshops, and networking blocks across events." />
       {sessions.length ? (
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="space-y-3">
           {sessions.map((session) => (
-            <Card key={session.id} id={`session-${session.id}`} className="scroll-mt-6">
-              <CardHeader>
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <CardTitle>{session.title}</CardTitle>
-                    <p className="mt-2 text-sm text-[#999999]">{eventTitleById.get(session.event_id) ?? "Unknown event"}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant={session.status === "published" ? "success" : "muted"}>{session.status}</Badge>
-                    <Badge variant="muted">{session.type}</Badge>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <form action={updateSession} className="space-y-4">
-                  <input type="hidden" name="sessionId" value={session.id} />
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <Field label="Title">
-                      <Input name="title" defaultValue={session.title} required />
+            <Card key={session.id} id={`session-${session.id}`} className="scroll-mt-6 overflow-hidden">
+              <details className="group">
+                <summary className="list-none cursor-pointer [&::-webkit-details-marker]:hidden">
+                  <CardHeader className="transition-colors group-open:border-b group-open:border-white/10">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <CardTitle>{session.title}</CardTitle>
+                        <p className="mt-2 text-sm text-[#999999]">{eventTitleById.get(session.event_id) ?? "Unknown event"}</p>
+                        <p className="mt-2 text-sm text-[#dddddd]">
+                          {new Date(session.starts_at).toLocaleString()} - {session.room ?? "No room"}
+                        </p>
+                        <p className="mt-1 text-sm text-[#999999]">Capacity: {session.capacity ?? "Unlimited"}</p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={session.status === "published" ? "success" : "muted"}>{session.status}</Badge>
+                        <Badge variant="muted">{session.type}</Badge>
+                        <span className="inline-flex h-9 items-center gap-2 rounded-md border border-white/15 px-3 text-sm font-medium text-white transition group-hover:bg-white/10">
+                          <Pencil className="h-4 w-4" aria-hidden />
+                          <span className="group-open:hidden">Edit</span>
+                          <span className="hidden group-open:inline">Close</span>
+                          <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" aria-hidden />
+                        </span>
+                      </div>
+                    </div>
+                  </CardHeader>
+                </summary>
+                <CardContent className="pt-5">
+                  <form action={updateSession} className="space-y-4">
+                    <input type="hidden" name="sessionId" value={session.id} />
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <Field label="Title">
+                        <Input name="title" defaultValue={session.title} required />
+                      </Field>
+                      <Field label="Slug">
+                        <Input name="slug" defaultValue={session.slug} required />
+                      </Field>
+                      <Field label="Event">
+                        <SelectField name="eventId" defaultValue={session.event_id} options={eventOptions} />
+                      </Field>
+                      <Field label="Room">
+                        <Input name="room" defaultValue={session.room ?? ""} />
+                      </Field>
+                      <Field label="Starts">
+                        <Input name="startsAt" type="datetime-local" defaultValue={toDateTimeLocalInputValue(session.starts_at)} required />
+                      </Field>
+                      <Field label="Ends">
+                        <Input name="endsAt" type="datetime-local" defaultValue={toDateTimeLocalInputValue(session.ends_at)} required />
+                      </Field>
+                      <Field label="Capacity">
+                        <Input name="capacity" type="number" min={1} defaultValue={session.capacity ?? ""} />
+                      </Field>
+                      <Field label="Type">
+                        <SelectField name="type" defaultValue={session.type} options={sessionTypeOptions} />
+                      </Field>
+                      <Field label="Status">
+                        <SelectField name="status" defaultValue={session.status} options={statusOptions} />
+                      </Field>
+                    </div>
+                    <Field label="Description">
+                      <Textarea name="description" defaultValue={session.description} />
                     </Field>
-                    <Field label="Slug">
-                      <Input name="slug" defaultValue={session.slug} required />
-                    </Field>
-                    <Field label="Event">
-                      <SelectField name="eventId" defaultValue={session.event_id} options={eventOptions} />
-                    </Field>
-                    <Field label="Room">
-                      <Input name="room" defaultValue={session.room ?? ""} />
-                    </Field>
-                    <Field label="Starts">
-                      <Input name="startsAt" type="datetime-local" defaultValue={toDateTimeLocalInputValue(session.starts_at)} required />
-                    </Field>
-                    <Field label="Ends">
-                      <Input name="endsAt" type="datetime-local" defaultValue={toDateTimeLocalInputValue(session.ends_at)} required />
-                    </Field>
-                    <Field label="Capacity">
-                      <Input name="capacity" type="number" min={1} defaultValue={session.capacity ?? ""} />
-                    </Field>
-                    <Field label="Type">
-                      <SelectField name="type" defaultValue={session.type} options={sessionTypeOptions} />
-                    </Field>
-                    <Field label="Status">
-                      <SelectField name="status" defaultValue={session.status} options={statusOptions} />
-                    </Field>
-                  </div>
-                  <Field label="Description">
-                    <Textarea name="description" defaultValue={session.description} />
-                  </Field>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <CheckboxField
-                      label="Requires registration"
-                      name="requiresRegistration"
-                      defaultChecked={session.requires_registration}
-                    />
-                    <CheckboxField
-                      label="Separate check-in"
-                      name="requiresSeparateCheckIn"
-                      defaultChecked={session.requires_separate_check_in}
-                    />
-                    <CheckboxField label="Waitlist enabled" name="waitlistEnabled" defaultChecked={session.waitlist_enabled} />
-                  </div>
-                  <Button type="submit">
-                    <Save className="h-4 w-4" aria-hidden />
-                    Save Session
-                  </Button>
-                </form>
-              </CardContent>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <CheckboxField
+                        label="Requires registration"
+                        name="requiresRegistration"
+                        defaultChecked={session.requires_registration}
+                      />
+                      <CheckboxField
+                        label="Separate check-in"
+                        name="requiresSeparateCheckIn"
+                        defaultChecked={session.requires_separate_check_in}
+                      />
+                      <CheckboxField label="Waitlist enabled" name="waitlistEnabled" defaultChecked={session.waitlist_enabled} />
+                    </div>
+                    <Button type="submit">
+                      <Save className="h-4 w-4" aria-hidden />
+                      Save Session
+                    </Button>
+                  </form>
+                </CardContent>
+              </details>
             </Card>
           ))}
         </div>
