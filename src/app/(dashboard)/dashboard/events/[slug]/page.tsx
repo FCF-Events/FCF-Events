@@ -1,17 +1,15 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
-import { ExternalLink, Pencil, Save, Users } from "lucide-react";
+import { notFound } from "next/navigation";
+import { ExternalLink, Pencil, Users } from "lucide-react";
+import { EventEditForm } from "@/components/event-edit-form";
+import { EventZeffySettingsForm } from "@/components/event-zeffy-settings-form";
 import { PageHeader } from "@/components/page-header";
+import { TicketTypeManager } from "@/components/ticket-type-manager";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { SelectField } from "@/components/ui/select-field";
-import { Textarea } from "@/components/ui/textarea";
-import { updateEventAction, updateEventZeffySettingsAction } from "@/lib/actions/events";
 import { getEventAttendees, getEventBySlug, getSessions, getTicketTypes } from "@/lib/data";
-import { currency, eventLocationLabel, googleMapsSearchUrl, toDateTimeLocalInputValue } from "@/lib/utils";
+import { eventLocationLabel, googleMapsSearchUrl } from "@/lib/utils";
 
 export default async function EventDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -25,26 +23,6 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
   ]);
   const locationLabel = eventLocationLabel(event.venue_name, event.address);
   const mapsHref = event.address?.trim() ? googleMapsSearchUrl(locationLabel) : null;
-
-  async function updateEvent(formData: FormData) {
-    "use server";
-    const result = await updateEventAction(formData);
-    if (
-      result.ok &&
-      "persisted" in result &&
-      result.persisted &&
-      "slug" in result &&
-      typeof result.slug === "string" &&
-      result.slug !== slug
-    ) {
-      redirect(`/dashboard/events/${result.slug}`);
-    }
-  }
-
-  async function updateZeffySettings(formData: FormData) {
-    "use server";
-    await updateEventZeffySettingsAction(formData);
-  }
 
   return (
     <>
@@ -131,16 +109,8 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
           <CardHeader>
             <CardTitle>Ticket Types</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {ticketTypes.map((ticket) => (
-              <div key={ticket.id} className="rounded-md border border-white/10 p-4">
-                <div className="flex items-center justify-between">
-                  <p className="font-medium text-white">{ticket.name}</p>
-                  <p className="text-sm text-[#dddddd]">{currency(ticket.price, ticket.currency)}</p>
-                </div>
-                <p className="mt-2 text-sm text-[#999999]">{ticket.description}</p>
-              </div>
-            ))}
+          <CardContent>
+            <TicketTypeManager eventId={event.id} ticketTypes={ticketTypes} />
           </CardContent>
         </Card>
       </div>
@@ -149,81 +119,7 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
           <CardTitle>Edit Event</CardTitle>
         </CardHeader>
         <CardContent>
-          <form action={updateEvent} className="space-y-4">
-            <input type="hidden" name="eventId" value={event.id} />
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label="Title">
-                <Input name="title" defaultValue={event.title} required />
-              </Field>
-              <Field label="Slug">
-                <Input name="slug" defaultValue={event.slug} required />
-              </Field>
-              <Field label="Starts">
-                <Input name="startsAt" type="datetime-local" defaultValue={toDateTimeLocalInputValue(event.starts_at)} required />
-              </Field>
-              <Field label="Ends">
-                <Input name="endsAt" type="datetime-local" defaultValue={toDateTimeLocalInputValue(event.ends_at)} required />
-              </Field>
-              <Field label="Venue">
-                <Input name="venueName" defaultValue={event.venue_name ?? ""} />
-              </Field>
-              <Field label="Room">
-                <Input name="room" defaultValue={event.room ?? ""} />
-              </Field>
-              <Field label="Capacity">
-                <Input name="capacity" type="number" min={1} defaultValue={event.capacity ?? ""} />
-              </Field>
-              <Field label="Minimum age">
-                <Input name="minimumAge" type="number" min={18} defaultValue={event.minimum_age} />
-              </Field>
-            </div>
-            <Field label="Address">
-              <Input name="address" defaultValue={event.address ?? ""} />
-            </Field>
-            <Field label="Description">
-              <Textarea name="description" defaultValue={event.description} />
-            </Field>
-            <Field label="Compliance notes">
-              <Textarea name="complianceNotes" defaultValue={event.compliance_notes ?? ""} />
-            </Field>
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label="Zeffy campaign ID">
-                <Input name="zeffyCampaignId" defaultValue={event.zeffy_campaign_id ?? ""} />
-              </Field>
-              <Field label="Zeffy form URL">
-                <Input name="zeffyFormUrl" type="url" defaultValue={event.zeffy_form_url ?? ""} placeholder="https://www.zeffy.com/..." />
-              </Field>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label="Status">
-                <SelectField
-                  name="status"
-                  defaultValue={event.status}
-                  options={[
-                    { label: "Draft", value: "draft" },
-                    { label: "Published", value: "published" },
-                    { label: "Cancelled", value: "cancelled" },
-                    { label: "Past", value: "past" },
-                  ]}
-                />
-              </Field>
-              <Field label="Visibility">
-                <SelectField
-                  name="visibility"
-                  defaultValue={event.visibility}
-                  options={[
-                    { label: "Private", value: "private" },
-                    { label: "Public", value: "public" },
-                    { label: "Unlisted", value: "unlisted" },
-                  ]}
-                />
-              </Field>
-            </div>
-            <Button type="submit">
-              <Save className="h-4 w-4" aria-hidden />
-              Save Event
-            </Button>
-          </form>
+          <EventEditForm event={event} />
         </CardContent>
       </Card>
       <Card id="attendees" className="mt-4 scroll-mt-6">
@@ -298,19 +194,7 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
           <CardTitle>Zeffy Payment Settings</CardTitle>
         </CardHeader>
         <CardContent>
-          <form action={updateZeffySettings} className="grid gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
-            <input type="hidden" name="eventId" value={event.id} />
-            <Field label="Campaign ID">
-              <Input name="zeffyCampaignId" defaultValue={event.zeffy_campaign_id ?? ""} placeholder="Zeffy campaign UUID" />
-            </Field>
-            <Field label="Form URL">
-              <Input name="zeffyFormUrl" type="url" defaultValue={event.zeffy_form_url ?? ""} placeholder="https://www.zeffy.com/..." />
-            </Field>
-            <Button type="submit">
-              <Save className="h-4 w-4" aria-hidden />
-              Save Zeffy
-            </Button>
-          </form>
+          <EventZeffySettingsForm event={event} />
         </CardContent>
       </Card>
       <Card className="mt-4">
@@ -335,15 +219,6 @@ export default async function EventDetailPage({ params }: { params: Promise<{ sl
         </CardContent>
       </Card>
     </>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      {children}
-    </div>
   );
 }
 

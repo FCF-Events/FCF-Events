@@ -187,6 +187,33 @@ export const zeffyEventSettingsSchema = z.object({
     .or(z.literal("")),
 });
 
+const optionalPositiveIntegerSchema = z.preprocess((value) => {
+  const text = String(value ?? "").trim();
+  return text ? text : undefined;
+}, z.coerce.number().int().positive().optional());
+
+export const ticketTypeSchema = z.object({
+  id: z.string().uuid().optional(),
+  eventId: z.string().uuid(),
+  name: z.string().trim().min(2, "Ticket name is required.").max(120),
+  description: z.string().trim().max(1000).optional().or(z.literal("")),
+  price: z
+    .string()
+    .trim()
+    .min(1, "Price is required.")
+    .transform((value) => Number(value))
+    .refine((value) => Number.isFinite(value), "Enter a valid price.")
+    .refine((value) => value >= 0 && value <= 999999, "Price must be between 0 and 999999."),
+  currency: z
+    .string()
+    .trim()
+    .length(3, "Use a three-letter currency code.")
+    .regex(/^[a-z]+$/i, "Use letters only for currency.")
+    .transform((value) => value.toUpperCase()),
+  capacityLimit: optionalPositiveIntegerSchema,
+  visibility: z.enum(["public", "private", "hidden"]).default("public"),
+});
+
 export const discountTypeSchema = z.enum(["percentage", "fixed_amount", "comp", "access_only"]);
 
 export const discountCodeSchema = z
