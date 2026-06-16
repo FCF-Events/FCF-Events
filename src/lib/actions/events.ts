@@ -68,7 +68,12 @@ export async function createEventAction(input: FormData) {
     entityId: data.id,
   });
 
+  revalidatePath("/");
+  revalidatePath("/dashboard");
   revalidatePath("/dashboard/events");
+  revalidatePath("/dashboard/check-in");
+  revalidatePath("/check-in");
+  revalidatePath(`/e/${values.slug}`);
   return { ok: true, message: "Event created." };
 }
 
@@ -145,6 +150,7 @@ export async function updateEventAction(input: FormData) {
   revalidatePath("/dashboard/events");
   revalidatePath("/dashboard/check-in");
   revalidatePath("/check-in");
+  revalidatePath("/");
   revalidatePath(`/dashboard/events/${existingEvent.slug}`);
   revalidatePath(`/dashboard/events/${values.slug}`);
   revalidatePath(`/e/${existingEvent.slug}`);
