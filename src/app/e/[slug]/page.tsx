@@ -3,6 +3,8 @@ import { CalendarDays, ExternalLink, MapPin, ShieldCheck, Ticket } from "lucide-
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RegistrationForm } from "@/components/registration-form";
+import { PublicFooter } from "@/components/public-footer";
+import { PublicHeader } from "@/components/public-header";
 import { getEventBySlug, getSessions, getTicketTypes } from "@/lib/data";
 import { eventLocationLabel, googleMapsSearchUrl } from "@/lib/utils";
 
@@ -17,6 +19,7 @@ export default async function PublicEventPage({ params }: { params: Promise<{ sl
 
   return (
     <main className="min-h-screen bg-[#0b0b0b] text-white">
+      <PublicHeader signupHref="#register" />
       <section className="border-b border-white/10">
         <div className="mx-auto grid max-w-7xl gap-8 px-4 py-8 md:grid-cols-[1fr_0.8fr] md:px-8 md:py-12">
           <div>
@@ -38,7 +41,9 @@ export default async function PublicEventPage({ params }: { params: Promise<{ sl
               </CardContent>
             </Card>
           </div>
-          <RegistrationForm event={event} ticketTypes={ticketTypes} sessions={sessions} />
+          <div id="register">
+            <RegistrationForm event={event} ticketTypes={ticketTypes} sessions={sessions} />
+          </div>
         </div>
       </section>
       <section className="mx-auto max-w-7xl px-4 py-8 md:px-8">
@@ -55,6 +60,7 @@ export default async function PublicEventPage({ params }: { params: Promise<{ sl
           ))}
         </div>
       </section>
+      <PublicFooter />
     </main>
   );
 }

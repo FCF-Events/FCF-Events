@@ -62,6 +62,46 @@ export const smsSendSchema = z.object({
   body: z.string().min(8).max(1200),
 });
 
+export const appRoleSchema = z.enum(["owner", "admin", "manager", "check_in_staff", "viewer"]);
+
+export const createUserSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Use a valid email address"),
+  fullName: z.string().trim().min(2, "Name is required").max(120).optional(),
+  password: z.string().min(12, "Use a temporary password with at least 12 characters"),
+  role: appRoleSchema,
+});
+
+export const updateMemberSchema = z.object({
+  userId: z.string().uuid(),
+  role: appRoleSchema,
+  isActive: z.boolean(),
+});
+
+export const eventAccessSchema = z.object({
+  userId: z.string().uuid(),
+  eventId: z.string().uuid(),
+  role: z.enum(["manager", "check_in_staff", "viewer"]),
+});
+
+export const accountProfileSchema = z.object({
+  fullName: z.string().trim().min(2, "Name is required").max(120),
+  phone: z.string().trim().max(40).optional(),
+});
+
+export const accountEmailSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Use a valid email address"),
+});
+
+export const accountPasswordSchema = z
+  .object({
+    password: z.string().min(12, "Use at least 12 characters"),
+    confirmPassword: z.string().min(12, "Confirm your new password"),
+  })
+  .refine((values) => values.password === values.confirmPassword, {
+    message: "Passwords must match",
+    path: ["confirmPassword"],
+  });
+
 export const airtableSettingsSchema = z.object({
   organizationId: z.string().uuid(),
   apiToken: z.string().min(8).optional(),
@@ -72,4 +112,3 @@ export const airtableSettingsSchema = z.object({
   registrationsTableName: z.string().min(1),
   ticketsTableName: z.string().min(1),
 });
-

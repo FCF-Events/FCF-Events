@@ -3,19 +3,29 @@
 :root {
   --background: #0b0b0b;
   --foreground: #ffffff;
+  --fcf-dark: #0b0b0b;
+  --fcf-red: #b20711;
+  --fcf-red-alt: #e50913;
+  --fcf-light: #ffffff;
+  --fcf-light-alt: #f0f0f0;
+  --fcf-grey: #dddddd;
+  --fcf-grey-secondary: #e9e9e9;
+  --fcf-grey-tertiary: #999999;
+  --fcf-grey-dark: #666666;
+  --fcf-grey-dark-alt: #333333;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-mono: "Century Gothic", "Aptos Mono", monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), "Century Gothic", Arial, Helvetica, sans-serif;
 }
 
 * {

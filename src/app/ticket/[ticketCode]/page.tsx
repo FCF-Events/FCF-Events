@@ -4,6 +4,8 @@ import { PrintTicketButton } from "@/components/print-ticket-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { TicketQr } from "@/components/ticket-qr";
+import { PublicFooter } from "@/components/public-footer";
+import { PublicHeader } from "@/components/public-header";
 import { ticketUrl } from "@/lib/security/qr";
 
 export default async function TicketPage({ params }: { params: Promise<{ ticketCode: string }> }) {
@@ -12,8 +14,11 @@ export default async function TicketPage({ params }: { params: Promise<{ ticketC
   const url = ticketUrl(decoded);
 
   return (
-    <main className="min-h-screen bg-[#0b0b0b] px-4 py-8 text-white print:bg-white print:text-black">
-      <div className="mx-auto max-w-2xl">
+    <main className="min-h-screen bg-[#0b0b0b] text-white print:bg-white print:text-black">
+      <div className="print:hidden">
+        <PublicHeader />
+      </div>
+      <div className="mx-auto max-w-2xl px-4 py-8">
         <div className="mb-6 flex items-center justify-between print:hidden">
           <Button asChild variant="outline">
             <Link href="/">FCF Events</Link>
@@ -39,6 +44,9 @@ export default async function TicketPage({ params }: { params: Promise<{ ticketC
             </div>
           </CardContent>
         </Card>
+      </div>
+      <div className="print:hidden">
+        <PublicFooter />
       </div>
     </main>
   );

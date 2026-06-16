@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import {
   Activity,
@@ -8,15 +9,19 @@ import {
   ClipboardList,
   ContactRound,
   LayoutDashboard,
+  LogOut,
   MessageSquare,
   Percent,
   Settings,
   ShieldCheck,
-  Ticket,
+  UserCog,
 } from "lucide-react";
+import { signOutAction } from "@/lib/actions/auth";
+import { ROLE_LABELS } from "@/lib/roles";
+import type { Role } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const nav = [
+const nav: Array<{ href: string; label: string; icon: React.ElementType; roles?: Role[] }> = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/dashboard/events", label: "Events", icon: CalendarDays },
   { href: "/dashboard/sessions", label: "Sessions", icon: ClipboardList },
@@ -24,27 +29,51 @@ const nav = [
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/dashboard/communications", label: "Communications", icon: MessageSquare },
   { href: "/dashboard/discounts", label: "Discounts", icon: Percent },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings },
-  { href: "/dashboard/check-in", label: "Check-in", icon: CheckCircle2 },
-  { href: "/dashboard/airtable-sync", label: "Airtable Sync", icon: AirVent },
-  { href: "/dashboard/audit-logs", label: "Audit Logs", icon: ShieldCheck },
+  { href: "/dashboard/users", label: "Users", icon: UserCog, roles: ["owner", "admin"] },
+  { href: "/dashboard/settings", label: "Settings", icon: Settings, roles: ["owner", "admin"] },
+  { href: "/dashboard/check-in", label: "Check-in", icon: CheckCircle2, roles: ["owner", "admin", "manager", "check_in_staff"] },
+  { href: "/dashboard/airtable-sync", label: "Airtable Sync", icon: AirVent, roles: ["owner", "admin"] },
+  { href: "/dashboard/audit-logs", label: "Audit Logs", icon: ShieldCheck, roles: ["owner", "admin", "manager", "viewer"] },
 ];
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+const footerLinks = [
+  { href: "/features", label: "Features" },
+  { href: "/legal/terms", label: "Terms" },
+  { href: "/legal/privacy", label: "Privacy" },
+  { href: "/legal/communications", label: "CASL & SMS" },
+  { href: "/legal/cannabis-compliance", label: "Cannabis Compliance" },
+];
+
+function visibleNavItems(role: Role | null) {
+  if (!role) return nav;
+  return nav.filter((item) => !item.roles || item.roles.includes(role));
+}
+
+export function AppShell({
+  children,
+  currentEmail,
+  currentRole,
+}: {
+  children: React.ReactNode;
+  currentEmail?: string | null;
+  currentRole?: Role | null;
+}) {
+  const items = visibleNavItems(currentRole ?? null);
+
   return (
     <div className="min-h-screen bg-[#0b0b0b] text-white">
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 border-r border-white/10 bg-[#0f0f0f] p-4 lg:block">
         <Link href="/dashboard" className="mb-8 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-[#b20711]">
-            <Ticket className="h-5 w-5" aria-hidden />
-          </div>
-          <div>
-            <p className="text-sm font-semibold">FCF Events</p>
-            <p className="text-xs text-[#999999]">Organizer console</p>
-          </div>
+          <Image
+            src="/brand/fcf-wordmark-white.png"
+            alt="The Federation of Cannabis Farmers"
+            width={230}
+            height={54}
+            className="h-auto w-48"
+          />
         </Link>
         <nav className="space-y-1">
-          {nav.map((item) => (
+          {items.map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -57,24 +86,65 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           ))}
         </nav>
+        <div className="absolute bottom-4 left-4 right-4 rounded-md border border-white/10 bg-[#0b0b0b] p-3">
+          <p className="truncate text-xs text-[#999999]">{currentEmail ?? "Demo user"}</p>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-white">{currentRole ? ROLE_LABELS[currentRole] : "Authenticated"}</span>
+            <form action={signOutAction}>
+              <button
+                type="submit"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[#999999] transition hover:bg-white/10 hover:text-white"
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                <LogOut className="h-4 w-4" aria-hidden />
+              </button>
+            </form>
+          </div>
+        </div>
       </aside>
       <div className="lg:pl-72">
         <header className="sticky top-0 z-10 border-b border-white/10 bg-[#0b0b0b]/90 px-4 py-3 backdrop-blur lg:px-8">
           <div className="flex items-center justify-between gap-4">
             <Link href="/dashboard" className="flex items-center gap-2 lg:hidden">
-              <Ticket className="h-5 w-5 text-[#e50913]" aria-hidden />
-              <span className="text-sm font-semibold">FCF Events</span>
+              <Image
+                src="/brand/fcf-wordmark-white.png"
+                alt="The Federation of Cannabis Farmers"
+                width={210}
+                height={49}
+                className="h-auto w-36"
+              />
             </Link>
             <div className="hidden text-sm text-[#999999] lg:block">Private event operations platform</div>
             <div className="flex items-center gap-2 text-xs text-[#999999]">
               <Activity className="h-4 w-4 text-emerald-300" aria-hidden />
-              Demo-safe mode
+              {currentRole ? ROLE_LABELS[currentRole] : "Demo-safe mode"}
             </div>
           </div>
+          <nav className="-mx-4 mt-3 flex gap-2 overflow-x-auto border-t border-white/10 px-4 pt-3 lg:hidden">
+            {items.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="flex shrink-0 items-center gap-2 rounded-md border border-white/10 px-3 py-2 text-xs text-[#dddddd]"
+              >
+                <item.icon className="h-3.5 w-3.5" aria-hidden />
+                {item.label}
+              </Link>
+            ))}
+          </nav>
         </header>
-        <main className="px-4 py-6 lg:px-8">{children}</main>
+        <main className="px-4 py-6 lg:px-8">
+          {children}
+          <footer className="mt-10 flex flex-wrap gap-x-4 gap-y-2 border-t border-white/10 pt-5 text-xs text-[#999999]">
+            {footerLinks.map((link) => (
+              <Link key={link.href} href={link.href} className="hover:text-white">
+                {link.label}
+              </Link>
+            ))}
+          </footer>
+        </main>
       </div>
     </div>
   );
 }
-

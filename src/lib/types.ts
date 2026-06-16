@@ -62,6 +62,42 @@ export type AttendeeSummary = {
   last_attended_at: string | null;
 };
 
+export type EventAccessAssignment = {
+  event_id: string;
+  event_title: string;
+  role: Role;
+};
+
+export type ManagedUserSummary = {
+  user_id: string;
+  email: string | null;
+  full_name: string | null;
+  role: Role;
+  is_active: boolean;
+  created_at: string;
+  last_sign_in_at: string | null;
+  event_access: EventAccessAssignment[];
+};
+
+export type AccountTicketSummary = {
+  ticket_id: string;
+  ticket_code: string;
+  ticket_status: TicketSummary["status"];
+  issued_at: string;
+  event_id: string;
+  event_title: string;
+  event_slug: string;
+  event_starts_at: string;
+  event_ends_at: string;
+  venue_name: string | null;
+  address: string | null;
+  ticket_type_name: string | null;
+  amount_due: number;
+  amount_paid: number;
+  payment_status: string;
+  registration_status: string;
+};
+
 export type TicketSummary = {
   id: string;
   ticket_code: string;
