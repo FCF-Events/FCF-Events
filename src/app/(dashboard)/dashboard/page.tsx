@@ -41,10 +41,10 @@ export default async function DashboardPage() {
       <section className="overflow-hidden rounded-lg border border-white/10 bg-[#0d1324] shadow-2xl shadow-black/30">
         <div className="grid gap-0 xl:grid-cols-[1fr_320px]">
           <div className="relative min-w-0 overflow-hidden p-5 sm:p-7">
-            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-teal-300/80 to-transparent" />
+            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-red-400/80 to-transparent" />
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0 space-y-4">
-                <div className="inline-flex items-center gap-2 rounded-full border border-teal-300/25 bg-teal-300/10 px-3 py-1 text-xs font-semibold text-teal-100">
+                <div className="inline-flex items-center gap-2 rounded-full border border-red-300/25 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-100">
                   <Activity className="h-3.5 w-3.5" aria-hidden />
                   Live operations
                 </div>
@@ -64,7 +64,7 @@ export default async function DashboardPage() {
                     Check-in
                   </Link>
                 </Button>
-                <Button asChild className="bg-teal-400 text-slate-950 hover:bg-teal-300">
+                <Button asChild className="bg-[#e50913] text-white hover:bg-[#b20711]">
                   <Link href="/dashboard/communications">
                     <Send className="h-4 w-4" aria-hidden />
                     Send Reminder
@@ -79,7 +79,7 @@ export default async function DashboardPage() {
                 icon={CalendarDays}
                 label="Upcoming Events"
                 series={[35, 42, 40, 54, 62, 70, 76]}
-                tone="teal"
+                tone="red"
                 value={metrics.upcomingEvents}
               />
               <StatCard
@@ -87,7 +87,7 @@ export default async function DashboardPage() {
                 icon={Ticket}
                 label="Registered"
                 series={[20, 38, 44, 58, 63, 72, 86]}
-                tone="indigo"
+                tone="rose"
                 value={metrics.totalRegistered}
               />
               <StatCard
@@ -117,10 +117,10 @@ export default async function DashboardPage() {
         <div className="min-w-0 space-y-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase text-teal-200">Event Pipeline</p>
+              <p className="text-xs font-semibold uppercase text-red-200">Event Pipeline</p>
               <h2 className="mt-1 text-xl font-semibold text-white">Upcoming events</h2>
             </div>
-            <Link href="/dashboard/events" className="inline-flex items-center gap-2 text-sm font-semibold text-teal-200 hover:text-teal-100">
+            <Link href="/dashboard/events" className="inline-flex items-center gap-2 text-sm font-semibold text-red-200 hover:text-red-100">
               View all events
               <ArrowRight className="h-4 w-4" aria-hidden />
             </Link>
@@ -140,10 +140,10 @@ export default async function DashboardPage() {
           <div className="rounded-lg border border-white/10 bg-[#101827] p-5 shadow-xl shadow-black/20">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase text-indigo-200">Quick Actions</p>
+                <p className="text-xs font-semibold uppercase text-red-200">Quick Actions</p>
                 <h2 className="mt-1 text-xl font-semibold text-white">Run the room</h2>
               </div>
-              <Sparkles className="h-5 w-5 text-teal-200" aria-hidden />
+              <Sparkles className="h-5 w-5 text-red-200" aria-hidden />
             </div>
             <div className="mt-5 grid gap-2">
               <QuickActionChip href="/dashboard/check-in" icon={ScanLine} label="Open check-in console" />
@@ -156,7 +156,7 @@ export default async function DashboardPage() {
           <div className="rounded-lg border border-white/10 bg-[#101827] p-5 shadow-xl shadow-black/20">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase text-teal-200">Automation</p>
+                <p className="text-xs font-semibold uppercase text-red-200">Automation</p>
                 <h2 className="mt-1 text-xl font-semibold text-white">Upcoming reminders</h2>
               </div>
               <Badge variant="muted">Queued</Badge>
@@ -166,7 +166,7 @@ export default async function DashboardPage() {
                 <Link
                   href="/dashboard/communications"
                   key={item}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-200 transition hover:border-teal-300/40 hover:bg-teal-300/10"
+                  className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-200 transition hover:border-red-300/40 hover:bg-red-500/10"
                 >
                   <span>{item}</span>
                   <ArrowRight className="h-4 w-4 text-slate-400" aria-hidden />
@@ -180,14 +180,14 @@ export default async function DashboardPage() {
       {activeEvent ? (
         <section className="grid gap-4 rounded-lg border border-white/10 bg-[#0e1524] p-5 shadow-xl shadow-black/20 lg:grid-cols-[1fr_auto] lg:items-center">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase text-teal-200">Next live event</p>
+            <p className="text-xs font-semibold uppercase text-red-200">Next live event</p>
             <h2 className="mt-2 truncate text-2xl font-semibold text-white">{activeEvent.title}</h2>
             <p className="mt-2 text-sm text-slate-300">
               {formatEventDate(activeEvent.starts_at)} - {activeEvent.venue_name ?? "Venue TBA"}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button asChild className="bg-indigo-400 text-slate-950 hover:bg-indigo-300">
+            <Button asChild className="bg-[#e50913] text-white hover:bg-[#b20711]">
               <Link href={`/dashboard/events/${activeEvent.slug}`}>
                 <LayoutDashboard className="h-4 w-4" aria-hidden />
                 Manage Event
@@ -214,9 +214,9 @@ function AdminNavRail() {
           <Link
             href={item.href}
             key={item.href}
-            className="group flex min-h-16 items-center gap-3 rounded-lg border border-white/10 bg-[#101827] px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-teal-300/40 hover:bg-teal-300/10 hover:text-white"
+            className="group flex min-h-16 items-center gap-3 rounded-lg border border-white/10 bg-[#101827] px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-red-300/40 hover:bg-red-500/10 hover:text-white"
           >
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-teal-200 transition group-hover:border-teal-300/40">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-red-200 transition group-hover:border-red-300/40">
               <item.icon className="h-4 w-4" aria-hidden />
             </span>
             {item.label}
@@ -239,14 +239,14 @@ function StatCard({
   icon: React.ElementType;
   label: string;
   series: number[];
-  tone: "teal" | "indigo" | "emerald" | "amber";
+  tone: "red" | "rose" | "emerald" | "amber";
   value: number | string;
 }) {
   const toneClasses = {
     amber: "border-amber-300/25 bg-amber-300/10 text-amber-100",
     emerald: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
-    indigo: "border-indigo-300/25 bg-indigo-300/10 text-indigo-100",
-    teal: "border-teal-300/25 bg-teal-300/10 text-teal-100",
+    red: "border-red-300/25 bg-red-500/10 text-red-100",
+    rose: "border-rose-300/25 bg-rose-500/10 text-rose-100",
   }[tone];
 
   return (
@@ -266,12 +266,12 @@ function StatCard({
   );
 }
 
-function Sparkline({ series, tone }: { series: number[]; tone: "teal" | "indigo" | "emerald" | "amber" }) {
+function Sparkline({ series, tone }: { series: number[]; tone: "red" | "rose" | "emerald" | "amber" }) {
   const barClass = {
     amber: "bg-amber-300",
     emerald: "bg-emerald-300",
-    indigo: "bg-indigo-300",
-    teal: "bg-teal-300",
+    red: "bg-red-400",
+    rose: "bg-rose-300",
   }[tone];
 
   return (
@@ -291,10 +291,10 @@ function EventCarouselCard({ event, index }: { event: Awaited<ReturnType<typeof 
   return (
     <Link
       href={`/dashboard/events/${event.slug}`}
-      className="group min-w-[280px] flex-1 rounded-lg border border-white/10 bg-[#101827] p-5 shadow-xl shadow-black/20 transition hover:border-teal-300/40 hover:bg-[#121d31]"
+      className="group min-w-[280px] flex-1 rounded-lg border border-white/10 bg-[#101827] p-5 shadow-xl shadow-black/20 transition hover:border-red-300/40 hover:bg-[#121d31]"
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-teal-300/25 bg-teal-300/10 text-teal-100">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-red-300/25 bg-red-500/10 text-red-100">
           <span className="text-sm font-semibold">{index + 1}</span>
         </div>
         <Badge variant={event.status === "published" ? "success" : "muted"}>{event.status}</Badge>
@@ -305,7 +305,7 @@ function EventCarouselCard({ event, index }: { event: Awaited<ReturnType<typeof 
         <br />
         {event.venue_name ?? "Venue TBA"}
       </p>
-      <div className="mt-5 flex items-center gap-2 text-sm font-semibold text-teal-200">
+      <div className="mt-5 flex items-center gap-2 text-sm font-semibold text-red-200">
         Manage event
         <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" aria-hidden />
       </div>
@@ -317,10 +317,10 @@ function QuickActionChip({ href, icon: Icon, label }: { href: string; icon: Reac
   return (
     <Link
       href={href}
-      className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-teal-300/40 hover:bg-teal-300/10 hover:text-white"
+      className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-red-300/40 hover:bg-red-500/10 hover:text-white"
     >
       <span className="flex items-center gap-3">
-        <Icon className="h-4 w-4 text-teal-200" aria-hidden />
+        <Icon className="h-4 w-4 text-red-200" aria-hidden />
         {label}
       </span>
       <ArrowRight className="h-4 w-4 text-slate-400" aria-hidden />

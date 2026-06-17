@@ -30,7 +30,6 @@ export default function AppRoot() {
 
   return (
     <SafeAreaProvider>
-      <NavigationBar hidden style="dark" />
       <StatusBar style="light" />
       <CheckInScreen />
     </SafeAreaProvider>

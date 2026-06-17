@@ -8,6 +8,7 @@ import type {
 } from "@/lib/types";
 
 const appUrl = process.env.EXPO_PUBLIC_APP_URL?.replace(/\/$/, "");
+const apiTimeoutMs = 15000;
 
 export class ApiError extends Error {
   payload: unknown;
@@ -34,20 +35,41 @@ async function apiFetch<T>(
     throw new ApiError("Set EXPO_PUBLIC_APP_URL to your FCF Events web app URL.", 0);
   }
 
-  const response = await fetch(`${appUrl}${path}`, {
-    method: options.method ?? "GET",
-    headers: {
-      Accept: "application/json",
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), apiTimeoutMs);
+  let response: Response;
+
+  try {
+    response = await fetch(`${appUrl}${path}`, {
+      method: options.method ?? "GET",
+      headers: {
+        Accept: "application/json",
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const errorName = error && typeof error === "object" && "name" in error ? String(error.name) : "";
+    if (errorName === "AbortError") {
+      throw new ApiError("The server took too long to respond. Check your connection and try again.", 0);
+    }
+
+    throw new ApiError("Could not reach the FCF Events server. Check your connection and try again.", 0);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
   const data = (await response.json().catch(() => null)) as
     | (Record<string, unknown> & { message?: string; result?: string })
     | null;
 
   if (!response.ok) {
+    if (response.status === 404 && path.startsWith("/api/check-in")) {
+      throw new ApiError("The FCF check-in API is not live yet. Deploy the website, then tap Refresh Access.", response.status, data);
+    }
+
     throw new ApiError(
       data?.message ?? resultMessage(data?.result) ?? `Request failed with HTTP ${response.status}.`,
       response.status,

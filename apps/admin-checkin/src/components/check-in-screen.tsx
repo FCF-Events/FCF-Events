@@ -31,6 +31,7 @@ import {
   NotebookPen,
   RefreshCw,
   Search,
+  ShieldCheck,
   Sparkles,
   Star,
   TicketCheck,
@@ -72,16 +73,15 @@ const colors = {
   text: "#f8fbff",
   muted: "#97a3b6",
   soft: "#d9e4f2",
-  accent: "#2dd4bf",
-  accentDark: "#0f766e",
-  indigo: "#6366f1",
-  indigoDark: "#4338ca",
+  accent: "#e50913",
+  accentDark: "#b20711",
+  accentSoft: "#ffb3b6",
   danger: "#fb7185",
   green: "#34d399",
   amber: "#fbbf24",
   blue: "#7dd3fc",
-  red: "#2dd4bf",
-  redDark: "#0f766e",
+  red: "#e50913",
+  redDark: "#b20711",
 };
 
 const emptyWalkUpForm: WalkUpFormState = {
@@ -97,6 +97,35 @@ const emptyWalkUpForm: WalkUpFormState = {
 
 const rememberMeKey = "fcf-checkin-remember-me";
 const rememberedEmailKey = "fcf-checkin-email";
+const tabletBreakpoint = 760;
+const tabletRailWidth = 164;
+const tabletRailGap = 16;
+const tabletShellMaxWidth = 1280;
+
+type CheckInTab = "scan" | "event" | "manual" | "attendees" | "walkUp" | "account";
+
+const checkInTabs: { key: CheckInTab; label: string; icon: LucideIcon; prominent?: boolean }[] = [
+  { key: "event", label: "Event", icon: Sparkles },
+  { key: "manual", label: "Manual", icon: Keyboard },
+  { key: "scan", label: "Scan", icon: Camera, prominent: true },
+  { key: "attendees", label: "Attendees", icon: Users },
+  { key: "walkUp", label: "Walk-Up", icon: UserPlus },
+];
+
+type CheckInOverviewItem = {
+  id: string;
+  scope: "event" | "session";
+  label: string;
+  detail: string;
+  checkedInCount: number;
+  totalCount: number;
+  waitingCount: number;
+  checkInRate: number;
+  startsAt?: string;
+  endsAt?: string;
+  room?: string | null;
+  requiresRegistration?: boolean;
+};
 
 export function CheckInScreen() {
   const { width } = useWindowDimensions();
@@ -140,12 +169,19 @@ export function CheckInScreen() {
   const [walkUp, setWalkUp] = useState<WalkUpFormState>(emptyWalkUpForm);
   const [isAddingWalkUp, setIsAddingWalkUp] = useState(false);
   const [manualEntryOpen, setManualEntryOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<CheckInTab>("scan");
+  const [eventOverviewItems, setEventOverviewItems] = useState<CheckInOverviewItem[]>([]);
+  const [overviewMessage, setOverviewMessage] = useState<string | null>(null);
+  const [isRefreshingOverview, setIsRefreshingOverview] = useState(false);
   const resultPulse = useRef(new Animated.Value(0)).current;
+  const overviewRequestId = useRef(0);
+  const contextAutoLoadTokenRef = useRef<string | null>(null);
 
   const token = session?.access_token ?? null;
   const selectedEvent = useMemo(() => events.find((event) => event.id === eventId) ?? null, [eventId, events]);
   const eventDayOptions = useMemo(() => eventDays.filter((item) => item.event_id === eventId), [eventDays, eventId]);
   const selectedEventDay = useMemo(() => eventDayOptions.find((item) => item.id === eventDayId) ?? null, [eventDayId, eventDayOptions]);
+  const overviewSessions = useMemo(() => sessions.filter((item) => item.event_id === eventId), [eventId, sessions]);
   const eventSessions = useMemo(
     () => sessions.filter((item) => item.event_id === eventId && (!eventDayId || !item.event_day_id || item.event_day_id === eventDayId)),
     [eventDayId, eventId, sessions],
@@ -201,7 +237,7 @@ export function CheckInScreen() {
       setContextLoaded(true);
       setContextMessage(data.message ?? null);
     } catch (error) {
-      setContextLoaded(false);
+      setContextLoaded(true);
       setContextMessage(messageFromError(error));
     } finally {
       setIsLoadingContext(false);
@@ -232,6 +268,82 @@ export function CheckInScreen() {
       }
     },
     [eventDayId, eventId, sessionId, token],
+  );
+
+  const refreshEventOverview = useCallback(
+    async (
+      targetEventId = eventId,
+      targetEventDayId = eventDayId,
+      targetSessions: SessionSummary[] = overviewSessions,
+    ) => {
+      if (!targetEventId || !targetEventDayId) {
+        setEventOverviewItems([]);
+        return;
+      }
+
+      const requestId = overviewRequestId.current + 1;
+      overviewRequestId.current = requestId;
+      setIsRefreshingOverview(true);
+      setOverviewMessage(null);
+
+      try {
+        const eventDaysById = new Map(
+          eventDays
+            .filter((day) => day.event_id === targetEventId)
+            .map((day) => [day.id, day.label]),
+        );
+        const gatePromise = fetchAttendees(token, {
+          eventId: targetEventId,
+          eventDayId: targetEventDayId,
+          sessionId: null,
+        });
+        const sessionPromises = targetSessions.map(async (sessionItem) => {
+          const sessionEventDayId = sessionItem.event_day_id ?? targetEventDayId;
+          const data = await fetchAttendees(token, {
+            eventId: targetEventId,
+            eventDayId: sessionEventDayId,
+            sessionId: sessionItem.id,
+          });
+
+          return { data, eventDayId: sessionEventDayId, session: sessionItem };
+        });
+        const [gateData, sessionData] = await Promise.all([gatePromise, Promise.all(sessionPromises)]);
+
+        if (requestId !== overviewRequestId.current) return;
+
+        setEventOverviewItems([
+          createOverviewItem({
+            attendees: gateData.attendees,
+            detail: eventDaysById.get(targetEventDayId) ?? "Selected check-in day",
+            id: "event-gate",
+            label: "Event gate",
+            scope: "event",
+          }),
+          ...sessionData.map(({ data, eventDayId: sessionEventDayId, session: sessionItem }) =>
+            createOverviewItem({
+              attendees: data.attendees,
+              detail: [eventDaysById.get(sessionEventDayId), sessionItem.room].filter(Boolean).join(" - ") || "Seminar",
+              endsAt: sessionItem.ends_at,
+              id: sessionItem.id,
+              label: sessionItem.title,
+              requiresRegistration: sessionItem.requires_registration,
+              room: sessionItem.room,
+              scope: "session",
+              startsAt: sessionItem.starts_at,
+            }),
+          ),
+        ]);
+      } catch (error) {
+        if (requestId !== overviewRequestId.current) return;
+        setEventOverviewItems([]);
+        setOverviewMessage(messageFromError(error));
+      } finally {
+        if (requestId === overviewRequestId.current) {
+          setIsRefreshingOverview(false);
+        }
+      }
+    },
+    [eventDayId, eventDays, eventId, overviewSessions, token],
   );
 
   useEffect(() => {
@@ -280,8 +392,10 @@ export function CheckInScreen() {
   }, []);
 
   useEffect(() => {
-    if (authReady && session && !contextLoaded && !isLoadingContext) {
-      void loadContext(session.access_token);
+    const accessToken = session?.access_token ?? null;
+    if (authReady && accessToken && !contextLoaded && !isLoadingContext && contextAutoLoadTokenRef.current !== accessToken) {
+      contextAutoLoadTokenRef.current = accessToken;
+      void loadContext(accessToken);
     }
   }, [authReady, contextLoaded, isLoadingContext, loadContext, session]);
 
@@ -290,6 +404,12 @@ export function CheckInScreen() {
       void refreshAttendees(eventId, eventDayId, sessionId);
     }
   }, [contextLoaded, eventDayId, eventId, refreshAttendees, sessionId]);
+
+  useEffect(() => {
+    if (contextLoaded && eventId && eventDayId) {
+      void refreshEventOverview(eventId, eventDayId, overviewSessions);
+    }
+  }, [contextLoaded, eventDayId, eventId, overviewSessions, refreshEventOverview]);
 
   useEffect(() => {
     if (eventDayId && eventDayOptions.some((day) => day.id === eventDayId)) return;
@@ -355,6 +475,7 @@ export function CheckInScreen() {
 
   async function signOut() {
     await supabase?.auth.signOut();
+    contextAutoLoadTokenRef.current = null;
     setSession(null);
     setDemoMode(false);
     setContextLoaded(false);
@@ -363,6 +484,8 @@ export function CheckInScreen() {
     setSessions([]);
     setTicketTypes([]);
     setAttendees([]);
+    setEventOverviewItems([]);
+    setOverviewMessage(null);
     setResult(null);
     setCameraActive(false);
     setCameraReady(false);
@@ -419,6 +542,7 @@ export function CheckInScreen() {
         setResult(data);
         if (data.result === "success") {
           await refreshAttendees(eventId, eventDayId, sessionId);
+          await refreshEventOverview(eventId, eventDayId, overviewSessions);
         }
       } catch (error) {
         if (error instanceof ApiError && isCheckInResult(error.payload)) {
@@ -481,6 +605,7 @@ export function CheckInScreen() {
         paymentMode: walkUp.paymentMode,
       });
       await refreshAttendees(eventId, eventDayId, sessionId);
+      await refreshEventOverview(eventId, eventDayId, overviewSessions);
     } catch (error) {
       if (error instanceof ApiError && isCheckInResult(error.payload)) {
         setResult(error.payload);
@@ -493,8 +618,15 @@ export function CheckInScreen() {
 
   const canCheckIn = Boolean(eventId && eventDayId);
   const notCheckedInCount = Math.max(attendees.length - checkedInCount, 0);
-  const isTabletLayout = width >= 760;
-  const cameraHeight = isTabletLayout ? 360 : 286;
+  const isTabletLayout = width >= tabletBreakpoint;
+  const shellHorizontalPadding = isTabletLayout ? 48 : 32;
+  const shellContentWidth = Math.min(Math.max(width - shellHorizontalPadding, 0), tabletShellMaxWidth);
+  const tabletMainColumnWidth = isTabletLayout
+    ? Math.max(0, shellContentWidth - tabletRailWidth - tabletRailGap)
+    : shellContentWidth;
+  const canUseWideTabletPanels = isTabletLayout && tabletMainColumnWidth >= 860;
+  const formColumnWidth = canUseWideTabletPanels ? tabletMainColumnWidth : Math.min(tabletMainColumnWidth, 620);
+  const cameraHeight = isTabletLayout ? (canUseWideTabletPanels ? 420 : 360) : 286;
   const selectedScopeLabel = selectedSession?.title ?? "Event gate";
   const selectedDayLabel = selectedEventDay?.label ?? "Daily admission";
   const checkInRate = attendees.length ? Math.round((checkedInCount / attendees.length) * 100) : 0;
@@ -502,13 +634,391 @@ export function CheckInScreen() {
     inputRange: [0, 1],
     outputRange: [0.96, 1],
   });
-  const panelGridStyle: StyleProp<ViewStyle> = isTabletLayout
+  const panelGridStyle: StyleProp<ViewStyle> = canUseWideTabletPanels
     ? { alignItems: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 16 }
     : { gap: 16 };
-  const halfPanelStyle: StyleProp<ViewStyle> = isTabletLayout
+  const halfPanelStyle: StyleProp<ViewStyle> = canUseWideTabletPanels
     ? { flexBasis: "48%", flexGrow: 1, minWidth: 330 }
     : undefined;
-  const fullPanelStyle: StyleProp<ViewStyle> = isTabletLayout ? { flexBasis: "100%" } : undefined;
+  const fullPanelStyle: StyleProp<ViewStyle> = isTabletLayout ? { flexBasis: "100%", minWidth: 0 } : undefined;
+  const tabletCardGridStyle: StyleProp<ViewStyle> = canUseWideTabletPanels
+    ? { flexDirection: "row", flexWrap: "wrap", gap: 12 }
+    : { gap: 10 };
+  const tabletCardItemStyle: StyleProp<ViewStyle> = canUseWideTabletPanels
+    ? { flexBasis: "48%", flexGrow: 1, minWidth: 360 }
+    : undefined;
+  async function refreshCurrentScope() {
+    await Promise.all([refreshAttendees(), refreshEventOverview()]);
+  }
+
+  const eventCommandPanel = (
+    <Panel title="Event Overview" icon={Sparkles} style={fullPanelStyle}>
+      <EventOverviewSnapshot
+        activeScopeId={sessionId || "event-gate"}
+        dayLabel={selectedDayLabel}
+        isLoading={isRefreshingOverview}
+        items={eventOverviewItems}
+        message={overviewMessage}
+        onRefresh={() => void refreshEventOverview()}
+        onSelectScope={(scopeId) => {
+          setSessionId(scopeId === "event-gate" ? "" : scopeId);
+          setLookupResults([]);
+          setLookupMessage(null);
+          setResult(null);
+          setCameraActive(false);
+        }}
+      />
+
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+        <SummaryPill label="Now scanning" value={selectedEvent?.title ?? "Choose an event"} emphasis />
+        <SummaryPill label="Day" value={selectedDayLabel} />
+        <SummaryPill label="Area" value={selectedScopeLabel} emphasis={Boolean(selectedSession)} />
+        <SummaryPill label="Progress" value={`${checkedInCount}/${attendees.length} (${checkInRate}%)`} />
+      </View>
+
+      <Field label="Quick event switcher">
+        <OptionRail
+          emptyText="No events are available for this scanner account."
+          items={events.map((event) => ({
+            label: event.title,
+            detail: formatEventDate(event.starts_at),
+            value: event.id,
+          }))}
+          onChange={(value) => {
+            setEventId(value);
+            setEventDayId(eventDays.find((day) => day.event_id === value)?.id ?? "");
+            setSessionId("");
+            setLookupResults([]);
+            setLookupMessage(null);
+            setResult(null);
+            setEventOverviewItems([]);
+            setOverviewMessage(null);
+            setCameraActive(false);
+          }}
+          value={eventId}
+        />
+      </Field>
+      <Field label="Check-in day">
+        <OptionRail
+          emptyText="No check-in days are configured for this event."
+          items={eventDayOptions.map((day) => ({
+            label: day.label,
+            detail: formatEventDate(day.starts_at),
+            value: day.id,
+          }))}
+          onChange={(value) => {
+            setEventDayId(value);
+            setSessionId("");
+            setLookupResults([]);
+            setLookupMessage(null);
+            setResult(null);
+            setEventOverviewItems([]);
+            setOverviewMessage(null);
+            setCameraActive(false);
+          }}
+          value={eventDayId}
+        />
+      </Field>
+      <Field label="Gate or seminar">
+        <OptionRail
+          items={[
+            { label: "Event gate", detail: selectedDayLabel, value: "" },
+            ...eventSessions.map((sessionItem) => ({
+              label: sessionItem.title,
+              detail: sessionItem.room ?? "Seminar",
+              value: sessionItem.id,
+            })),
+          ]}
+          onChange={(value) => {
+            setSessionId(value);
+            setLookupResults([]);
+            setLookupMessage(null);
+            setResult(null);
+            setCameraActive(false);
+          }}
+          value={sessionId}
+        />
+      </Field>
+    </Panel>
+  );
+  const scannerPanel = (
+    <Panel title="Live Scanner" icon={Camera} style={[halfPanelStyle, canUseWideTabletPanels ? { flexBasis: "58%", minWidth: 520 } : undefined]}>
+      <ScannerLaunchCard
+        cameraHeight={cameraHeight}
+        cameraMessage={cameraMessage}
+        canCheckIn={canCheckIn}
+        isCheckingIn={isCheckingIn}
+        onManualTicket={() => {
+          setManualEntryOpen(true);
+          setActiveTab("manual");
+        }}
+        onOpenScanner={() => void startCamera()}
+        permissionGranted={permission?.granted}
+        selectedDayLabel={selectedDayLabel}
+        selectedEventTitle={selectedEvent?.title ?? "Choose an event"}
+        selectedSession={selectedSession}
+        selectedScopeLabel={selectedScopeLabel}
+      />
+      <QuickActionDock
+        onNote={() => setStatusMessage("Guest notes are managed from the attendee profile. Search the guest below to open the right record.")}
+        onUndo={() => {
+          setResult(null);
+          setTicketCode("");
+          setStatusMessage("Last scan cleared.");
+        }}
+        onVip={() => {
+          setAttendeeQuery("vip");
+          setAttendeeFilter("all");
+          setActiveTab("attendees");
+          setStatusMessage("VIP filter ready.");
+        }}
+      />
+    </Panel>
+  );
+  const resultPanel = (
+    <Panel title="Instant Feedback" icon={resultIcon(result)} style={[halfPanelStyle, canUseWideTabletPanels ? { flexBasis: "38%", minWidth: 330 } : undefined]}>
+      <Animated.View style={{ transform: [{ scale: resultScale }] }}>
+        <PremiumResultCard result={result} statusMessage={statusMessage} />
+      </Animated.View>
+    </Panel>
+  );
+  const attendeePanel = (
+    <Panel title="Attendee Flow" icon={Users} style={fullPanelStyle}>
+      <AttendeeStatsStrip checkedInCount={checkedInCount} checkInRate={checkInRate} notCheckedInCount={notCheckedInCount} />
+      <View style={{ alignItems: "center", flexDirection: "row", gap: 10 }}>
+        <View style={{ flex: 1 }}>
+          <TextInput
+            autoCorrect={false}
+            onChangeText={setAttendeeQuery}
+            placeholder="Search attendees, ticket code, company"
+            placeholderTextColor="#717780"
+            style={inputStyle}
+            value={attendeeQuery}
+          />
+        </View>
+        <Pressable
+          disabled={isRefreshingAttendees}
+          onPress={() => void refreshAttendees()}
+          style={({ pressed }) => ({
+            alignItems: "center",
+            backgroundColor: pressed ? colors.panelElevated : colors.panelAlt,
+            borderColor: colors.border,
+            borderRadius: 18,
+            borderWidth: 1,
+            height: 56,
+            justifyContent: "center",
+            opacity: isRefreshingAttendees ? 0.55 : 1,
+            width: 56,
+          })}
+        >
+          {isRefreshingAttendees ? <ActivityIndicator color={colors.accent} /> : <RefreshCw color={colors.soft} size={21} />}
+        </Pressable>
+      </View>
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <FilterButton active={attendeeFilter === "all"} label="All" onPress={() => setAttendeeFilter("all")} />
+        <FilterButton active={attendeeFilter === "checked_in"} label="In" onPress={() => setAttendeeFilter("checked_in")} />
+        <FilterButton active={attendeeFilter === "not_checked_in"} label="Waiting" onPress={() => setAttendeeFilter("not_checked_in")} />
+      </View>
+      <View style={tabletCardGridStyle}>
+        {visibleAttendees.length ? (
+          visibleAttendees.map((attendee) => (
+            <View key={attendee.registration_id} style={tabletCardItemStyle}>
+              <AttendeeRow
+                attendee={attendee}
+                disabled={isCheckingIn}
+                onCheckIn={(code) => void submitTicket(code)}
+              />
+            </View>
+          ))
+        ) : (
+          <EmptyText text={attendees.length ? "No attendees match the current filters." : "No attendees are registered for this event."} />
+        )}
+      </View>
+    </Panel>
+  );
+  const manualPanel = (
+    <View style={{ gap: 16 }}>
+      <Panel title="Manual Ticket" icon={Keyboard} style={fullPanelStyle}>
+        <ActionButton
+          icon={Keyboard}
+          label={manualEntryOpen || isTabletLayout || activeTab === "manual" ? "Manual Entry Ready" : "Manual Ticket"}
+          onPress={() => setManualEntryOpen((current) => !current)}
+          variant={manualEntryOpen || isTabletLayout || activeTab === "manual" ? "secondary" : "primary"}
+        />
+        {manualEntryOpen || isTabletLayout || activeTab === "manual" ? (
+          <View style={{ gap: 12 }}>
+            <Field label="Ticket code">
+              <TextInput
+                autoCapitalize="characters"
+                autoCorrect={false}
+                onChangeText={setTicketCode}
+                onSubmitEditing={() => void submitTicket(ticketCode)}
+                placeholder="FCF-..."
+                placeholderTextColor="#717780"
+                style={inputStyle}
+                value={ticketCode}
+              />
+            </Field>
+            <ActionButton
+              disabled={!ticketCode.trim() || !canCheckIn || isCheckingIn}
+              icon={TicketCheck}
+              label={isCheckingIn ? "Checking In" : "Check In Ticket"}
+              onPress={() => void submitTicket(ticketCode)}
+            />
+          </View>
+        ) : null}
+        <View style={{ borderTopColor: colors.border, borderTopWidth: 1, gap: 12, paddingTop: 14 }}>
+          <Field label="Guest lookup">
+            <TextInput
+              autoCorrect={false}
+              onChangeText={setLookupQuery}
+              onSubmitEditing={() => void runLookup()}
+              placeholder="Name, email, phone, or code"
+              placeholderTextColor="#717780"
+              style={inputStyle}
+              value={lookupQuery}
+            />
+          </Field>
+          <ActionButton disabled={!canCheckIn || isSearching} icon={Search} label={isSearching ? "Searching" : "Search Guest"} onPress={() => void runLookup()} />
+          {lookupMessage ? (
+            <Text selectable style={{ color: colors.muted, fontSize: 14, lineHeight: 20 }}>
+              {lookupMessage}
+            </Text>
+          ) : null}
+          <View style={tabletCardGridStyle}>
+            {lookupResults.map((guest) => (
+              <View key={guest.ticketId} style={tabletCardItemStyle}>
+                <LookupRow disabled={isCheckingIn} guest={guest} onCheckIn={(code) => void submitTicket(code)} />
+              </View>
+            ))}
+          </View>
+        </View>
+      </Panel>
+      {result || statusMessage ? resultPanel : null}
+    </View>
+  );
+  const walkUpPanel = (
+    <View style={{ gap: 16 }}>
+      <Panel title="Walk-up Guest" icon={UserPlus} style={fullPanelStyle}>
+        <TwoColumn width={formColumnWidth}>
+          <Field label="First name">
+            <WalkUpInput value={walkUp.firstName} onChangeText={(value) => setWalkUp((current) => ({ ...current, firstName: value }))} />
+          </Field>
+          <Field label="Last name">
+            <WalkUpInput value={walkUp.lastName} onChangeText={(value) => setWalkUp((current) => ({ ...current, lastName: value }))} />
+          </Field>
+          <Field label="Email">
+            <WalkUpInput
+              autoCapitalize="none"
+              inputMode="email"
+              value={walkUp.email}
+              onChangeText={(value) => setWalkUp((current) => ({ ...current, email: value }))}
+            />
+          </Field>
+          <Field label="Phone">
+            <WalkUpInput
+              inputMode="tel"
+              value={walkUp.phone}
+              onChangeText={(value) => setWalkUp((current) => ({ ...current, phone: value }))}
+            />
+          </Field>
+        </TwoColumn>
+        <Field label="Ticket type">
+          <OptionRail
+            items={eventTicketTypes.map((ticketType) => ({
+              label: ticketType.name,
+              detail: formatMoney(ticketType.price, ticketType.currency),
+              value: ticketType.id,
+            }))}
+            onChange={(value) => setWalkUp((current) => ({ ...current, ticketTypeId: value }))}
+            value={walkUp.ticketTypeId}
+          />
+        </Field>
+        <Field label="Payment">
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <FilterButton
+              active={walkUp.paymentMode === "cash"}
+              label="Cash"
+              onPress={() => setWalkUp((current) => ({ ...current, paymentMode: "cash" }))}
+            />
+            <FilterButton
+              active={walkUp.paymentMode === "comp"}
+              label="Comp"
+              onPress={() => setWalkUp((current) => ({ ...current, paymentMode: "comp" }))}
+            />
+          </View>
+        </Field>
+        <TwoColumn width={formColumnWidth}>
+          <Field label="Company">
+            <WalkUpInput value={walkUp.company} onChangeText={(value) => setWalkUp((current) => ({ ...current, company: value }))} />
+          </Field>
+          <Field label="Role / title">
+            <WalkUpInput value={walkUp.roleTitle} onChangeText={(value) => setWalkUp((current) => ({ ...current, roleTitle: value }))} />
+          </Field>
+        </TwoColumn>
+        <ActionButton
+          disabled={!walkUp.firstName.trim() || !walkUp.lastName.trim() || !walkUp.ticketTypeId || isAddingWalkUp}
+          icon={UserPlus}
+          label={isAddingWalkUp ? "Adding" : "Add and Check In"}
+          onPress={() => void addWalkUp()}
+        />
+      </Panel>
+      {result || statusMessage ? resultPanel : null}
+    </View>
+  );
+  const accountPanel = (
+    <Panel title="Scanner Account" icon={ShieldCheck} style={fullPanelStyle}>
+      <View style={{ flexDirection: isTabletLayout ? "row" : "column", flexWrap: "wrap", gap: 10 }}>
+        <SummaryPill label="Signed in as" value={session?.user?.email ?? (demoMode ? "Demo mode" : "Scanner account")} emphasis />
+        <SummaryPill label="Current event" value={selectedEvent?.title ?? "No event selected"} />
+        <SummaryPill label="Check-in day" value={selectedDayLabel} />
+        <SummaryPill label="Area" value={selectedScopeLabel} emphasis={Boolean(selectedSession)} />
+      </View>
+      <View style={{ flexDirection: isTabletLayout ? "row" : "column", gap: 10 }}>
+        <View style={{ flex: 1 }}>
+          <ActionButton disabled={isLoadingContext} icon={RefreshCw} label={isLoadingContext ? "Refreshing" : "Refresh Access"} onPress={() => void loadContext(token)} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <ActionButton icon={LogOut} label="Sign Out" onPress={signOut} variant="secondary" />
+        </View>
+      </View>
+    </Panel>
+  );
+  const activeTabContent =
+    activeTab === "scan" ? (
+      <View style={{ gap: 16 }}>
+        <View style={panelGridStyle}>
+          {scannerPanel}
+          {resultPanel}
+        </View>
+      </View>
+    ) : activeTab === "event" ? (
+      eventCommandPanel
+    ) : activeTab === "manual" ? (
+      manualPanel
+    ) : activeTab === "attendees" ? (
+      attendeePanel
+    ) : activeTab === "walkUp" ? (
+      walkUpPanel
+    ) : (
+      accountPanel
+    );
+  const emptyEventContent =
+    activeTab === "account" ? (
+      accountPanel
+    ) : (
+      <NoEventsState
+        isLoading={isLoadingContext}
+        message={contextMessage ?? "No events are available for this scanner account yet."}
+        onRefresh={() => {
+          void loadContext(token);
+        }}
+        onSignOut={signOut}
+      />
+    );
+  const bottomNavigation = !isTabletLayout ? (
+    <CheckInBottomNavigation activeTab={activeTab} onTabChange={setActiveTab} />
+  ) : null;
 
   if (!authReady) {
     return (
@@ -616,15 +1126,16 @@ export function CheckInScreen() {
 
   return (
     <>
-      <ScreenShell>
+      <ScreenShell bottomBar={bottomNavigation} maxWidth={tabletShellMaxWidth}>
         {/* NEW SLEEK MODERN DESIGN - Material 3 inspired event check-in surface */}
         <View style={{ gap: isTabletLayout ? 22 : 16 }}>
           <StaffTopBar
+            accountActive={activeTab === "account"}
             checkedInCount={checkedInCount}
             isLoading={isLoadingContext}
             modeLabel={selectedSession ? "Seminar scan" : "Event gate"}
-            onRefresh={() => void refreshAttendees()}
-            onSignOut={signOut}
+            onOpenAccount={() => setActiveTab("account")}
+            onRefresh={() => void refreshCurrentScope()}
             selectedEventTitle={selectedEvent?.title ?? "Choose event"}
             selectedScopeLabel={selectedScopeLabel}
             totalCount={attendees.length}
@@ -634,286 +1145,9 @@ export function CheckInScreen() {
             <StatusBanner tone="warning" text={contextMessage} />
           ) : null}
 
-          <Panel title="Event Command Center" icon={Sparkles} style={fullPanelStyle}>
-            <View style={{ flexDirection: isTabletLayout ? "row" : "column", flexWrap: "wrap", gap: 10 }}>
-              <SummaryPill label="Now scanning" value={selectedEvent?.title ?? "Choose an event"} emphasis />
-              <SummaryPill label="Day" value={selectedDayLabel} />
-              <SummaryPill label="Area" value={selectedScopeLabel} emphasis={Boolean(selectedSession)} />
-              <SummaryPill label="Progress" value={`${checkedInCount}/${attendees.length} (${checkInRate}%)`} />
-            </View>
-
-            <Field label="Quick event switcher">
-              <OptionRail
-                emptyText="No events are available for this scanner account."
-                items={events.map((event) => ({
-                  label: event.title,
-                  detail: formatEventDate(event.starts_at),
-                  value: event.id,
-                }))}
-                onChange={(value) => {
-                  setEventId(value);
-                  setEventDayId(eventDays.find((day) => day.event_id === value)?.id ?? "");
-                  setSessionId("");
-                  setLookupResults([]);
-                  setLookupMessage(null);
-                  setResult(null);
-                  setCameraActive(false);
-                }}
-                value={eventId}
-              />
-            </Field>
-            <Field label="Check-in day">
-              <OptionRail
-                emptyText="No check-in days are configured for this event."
-                items={eventDayOptions.map((day) => ({
-                  label: day.label,
-                  detail: formatEventDate(day.starts_at),
-                  value: day.id,
-                }))}
-                onChange={(value) => {
-                  setEventDayId(value);
-                  setSessionId("");
-                  setLookupResults([]);
-                  setLookupMessage(null);
-                  setResult(null);
-                  setCameraActive(false);
-                }}
-                value={eventDayId}
-              />
-            </Field>
-            <Field label="Gate or seminar">
-              <OptionRail
-                items={[
-                  { label: "Event gate", detail: selectedDayLabel, value: "" },
-                  ...eventSessions.map((sessionItem) => ({
-                    label: sessionItem.title,
-                    detail: sessionItem.room ?? "Seminar",
-                    value: sessionItem.id,
-                  })),
-                ]}
-                onChange={(value) => {
-                  setSessionId(value);
-                  setLookupResults([]);
-                  setLookupMessage(null);
-                  setResult(null);
-                  setCameraActive(false);
-                }}
-                value={sessionId}
-              />
-            </Field>
-          </Panel>
-
-          <View style={panelGridStyle}>
-            <Panel title="Live Scanner" icon={Camera} style={[halfPanelStyle, isTabletLayout ? { flexBasis: "58%", minWidth: 430 } : undefined]}>
-              <ScannerLaunchCard
-                cameraHeight={cameraHeight}
-                cameraMessage={cameraMessage}
-                canCheckIn={canCheckIn}
-                isCheckingIn={isCheckingIn}
-                onManualTicket={() => setManualEntryOpen(true)}
-                onOpenScanner={() => void startCamera()}
-                permissionGranted={permission?.granted}
-                selectedDayLabel={selectedDayLabel}
-                selectedEventTitle={selectedEvent?.title ?? "Choose an event"}
-                selectedSession={selectedSession}
-                selectedScopeLabel={selectedScopeLabel}
-              />
-              <QuickActionDock
-                onNote={() => setStatusMessage("Guest notes are managed from the attendee profile. Search the guest below to open the right record.")}
-                onUndo={() => {
-                  setResult(null);
-                  setTicketCode("");
-                  setStatusMessage("Last scan cleared.");
-                }}
-                onVip={() => {
-                  setAttendeeQuery("vip");
-                  setAttendeeFilter("all");
-                  setStatusMessage("VIP filter ready.");
-                }}
-              />
-            </Panel>
-
-            <Panel title="Instant Feedback" icon={resultIcon(result)} style={[halfPanelStyle, isTabletLayout ? { flexBasis: "38%", minWidth: 320 } : undefined]}>
-              <Animated.View style={{ transform: [{ scale: resultScale }] }}>
-                <PremiumResultCard result={result} statusMessage={statusMessage} />
-              </Animated.View>
-            </Panel>
-
-          </View>
-
-          <View style={panelGridStyle}>
-            <Panel title="Attendee Flow" icon={Users} style={[halfPanelStyle, isTabletLayout ? { flexBasis: "58%", minWidth: 430 } : undefined]}>
-              <AttendeeStatsStrip checkedInCount={checkedInCount} checkInRate={checkInRate} notCheckedInCount={notCheckedInCount} />
-              <View style={{ alignItems: "center", flexDirection: "row", gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <TextInput
-                    autoCorrect={false}
-                    onChangeText={setAttendeeQuery}
-                    placeholder="Search attendees, ticket code, company"
-                    placeholderTextColor="#717780"
-                    style={inputStyle}
-                    value={attendeeQuery}
-                  />
-                </View>
-                <Pressable
-                  disabled={isRefreshingAttendees}
-                  onPress={() => void refreshAttendees()}
-                  style={({ pressed }) => ({
-                    alignItems: "center",
-                    backgroundColor: pressed ? colors.panelElevated : colors.panelAlt,
-                    borderColor: colors.border,
-                    borderRadius: 18,
-                    borderWidth: 1,
-                    height: 56,
-                    justifyContent: "center",
-                    opacity: isRefreshingAttendees ? 0.55 : 1,
-                    width: 56,
-                  })}
-                >
-                  {isRefreshingAttendees ? <ActivityIndicator color={colors.accent} /> : <RefreshCw color={colors.soft} size={21} />}
-                </Pressable>
-              </View>
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                <FilterButton active={attendeeFilter === "all"} label="All" onPress={() => setAttendeeFilter("all")} />
-                <FilterButton active={attendeeFilter === "checked_in"} label="In" onPress={() => setAttendeeFilter("checked_in")} />
-                <FilterButton active={attendeeFilter === "not_checked_in"} label="Waiting" onPress={() => setAttendeeFilter("not_checked_in")} />
-              </View>
-              <View style={{ gap: 10 }}>
-                {visibleAttendees.length ? (
-                  visibleAttendees.map((attendee) => (
-                    <AttendeeRow
-                      attendee={attendee}
-                      disabled={isCheckingIn}
-                      key={attendee.registration_id}
-                      onCheckIn={(code) => void submitTicket(code)}
-                    />
-                  ))
-                ) : (
-                  <EmptyText text={attendees.length ? "No attendees match the current filters." : "No attendees are registered for this event."} />
-                )}
-              </View>
-            </Panel>
-
-            <Panel title="Manual Ticket" icon={Keyboard} style={[halfPanelStyle, isTabletLayout ? { flexBasis: "38%", minWidth: 320 } : undefined]}>
-              <ActionButton
-                icon={Keyboard}
-                label={manualEntryOpen || isTabletLayout ? "Manual Entry Ready" : "Manual Ticket"}
-                onPress={() => setManualEntryOpen((current) => !current)}
-                variant={manualEntryOpen || isTabletLayout ? "secondary" : "primary"}
-              />
-              {manualEntryOpen || isTabletLayout ? (
-                <View style={{ gap: 12 }}>
-                  <Field label="Ticket code">
-                    <TextInput
-                      autoCapitalize="characters"
-                      autoCorrect={false}
-                      onChangeText={setTicketCode}
-                      onSubmitEditing={() => void submitTicket(ticketCode)}
-                      placeholder="FCF-..."
-                      placeholderTextColor="#717780"
-                      style={inputStyle}
-                      value={ticketCode}
-                    />
-                  </Field>
-                  <ActionButton
-                    disabled={!ticketCode.trim() || !canCheckIn || isCheckingIn}
-                    icon={TicketCheck}
-                    label={isCheckingIn ? "Checking In" : "Check In Ticket"}
-                    onPress={() => void submitTicket(ticketCode)}
-                  />
-                </View>
-              ) : null}
-              <View style={{ borderTopColor: colors.border, borderTopWidth: 1, gap: 12, paddingTop: 14 }}>
-                <Field label="Guest lookup">
-                  <TextInput
-                    autoCorrect={false}
-                    onChangeText={setLookupQuery}
-                    onSubmitEditing={() => void runLookup()}
-                    placeholder="Name, email, phone, or code"
-                    placeholderTextColor="#717780"
-                    style={inputStyle}
-                    value={lookupQuery}
-                  />
-                </Field>
-                <ActionButton disabled={!canCheckIn || isSearching} icon={Search} label={isSearching ? "Searching" : "Search Guest"} onPress={() => void runLookup()} />
-                {lookupMessage ? (
-                  <Text selectable style={{ color: colors.muted, fontSize: 14, lineHeight: 20 }}>
-                    {lookupMessage}
-                  </Text>
-                ) : null}
-                <View style={{ gap: 10 }}>
-                  {lookupResults.map((guest) => (
-                    <LookupRow disabled={isCheckingIn} guest={guest} key={guest.ticketId} onCheckIn={(code) => void submitTicket(code)} />
-                  ))}
-                </View>
-              </View>
-            </Panel>
-          </View>
-
-          <Panel title="Walk-up Guest" icon={UserPlus} style={fullPanelStyle}>
-          <TwoColumn width={width}>
-            <Field label="First name">
-              <WalkUpInput value={walkUp.firstName} onChangeText={(value) => setWalkUp((current) => ({ ...current, firstName: value }))} />
-            </Field>
-            <Field label="Last name">
-              <WalkUpInput value={walkUp.lastName} onChangeText={(value) => setWalkUp((current) => ({ ...current, lastName: value }))} />
-            </Field>
-            <Field label="Email">
-              <WalkUpInput
-                autoCapitalize="none"
-                inputMode="email"
-                value={walkUp.email}
-                onChangeText={(value) => setWalkUp((current) => ({ ...current, email: value }))}
-              />
-            </Field>
-            <Field label="Phone">
-              <WalkUpInput
-                inputMode="tel"
-                value={walkUp.phone}
-                onChangeText={(value) => setWalkUp((current) => ({ ...current, phone: value }))}
-              />
-            </Field>
-          </TwoColumn>
-          <Field label="Ticket type">
-            <OptionRail
-              items={eventTicketTypes.map((ticketType) => ({
-                label: ticketType.name,
-                detail: formatMoney(ticketType.price, ticketType.currency),
-                value: ticketType.id,
-              }))}
-              onChange={(value) => setWalkUp((current) => ({ ...current, ticketTypeId: value }))}
-              value={walkUp.ticketTypeId}
-            />
-          </Field>
-          <Field label="Payment">
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              <FilterButton
-                active={walkUp.paymentMode === "cash"}
-                label="Cash"
-                onPress={() => setWalkUp((current) => ({ ...current, paymentMode: "cash" }))}
-              />
-              <FilterButton
-                active={walkUp.paymentMode === "comp"}
-                label="Comp"
-                onPress={() => setWalkUp((current) => ({ ...current, paymentMode: "comp" }))}
-              />
-            </View>
-          </Field>
-          <TwoColumn width={width}>
-            <Field label="Company">
-              <WalkUpInput value={walkUp.company} onChangeText={(value) => setWalkUp((current) => ({ ...current, company: value }))} />
-            </Field>
-            <Field label="Role / title">
-              <WalkUpInput value={walkUp.roleTitle} onChangeText={(value) => setWalkUp((current) => ({ ...current, roleTitle: value }))} />
-            </Field>
-          </TwoColumn>
-          <ActionButton
-            disabled={!walkUp.firstName.trim() || !walkUp.lastName.trim() || !walkUp.ticketTypeId || isAddingWalkUp}
-            icon={UserPlus}
-            label={isAddingWalkUp ? "Adding" : "Add and Check In"}
-            onPress={() => void addWalkUp()}
-          />
-          </Panel>
+          <CheckInNavigationShell activeTab={activeTab} isTabletLayout={isTabletLayout} onTabChange={setActiveTab}>
+            {events.length ? activeTabContent : emptyEventContent}
+          </CheckInNavigationShell>
         </View>
       </ScreenShell>
       <Modal
@@ -1044,34 +1278,269 @@ export function CheckInScreen() {
   );
 }
 
-function ScreenShell({ children, maxWidth = 1180 }: { children: React.ReactNode; maxWidth?: number }) {
+function ScreenShell({
+  bottomBar,
+  children,
+  maxWidth = tabletShellMaxWidth,
+}: {
+  bottomBar?: React.ReactNode;
+  children: React.ReactNode;
+  maxWidth?: number;
+}) {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const isWide = width >= 760;
+  const isWide = width >= tabletBreakpoint;
   const horizontalPadding = isWide ? 24 : 16;
   const topPadding = isWide ? 24 : 16;
   const bottomPadding = isWide ? 44 : 36;
+  const stableTopInset = process.env.EXPO_OS === "android" ? 44 : insets.top;
+  const stableBottomInset = process.env.EXPO_OS === "android" ? 0 : insets.bottom;
+  const hasBottomBar = Boolean(bottomBar);
 
   return (
     <KeyboardAvoidingView
       behavior={process.env.EXPO_OS === "ios" ? "padding" : undefined}
-      style={{ backgroundColor: colors.background, flex: 1, paddingBottom: insets.bottom, paddingTop: insets.top }}
+      style={{ backgroundColor: colors.background, flex: 1, paddingBottom: stableBottomInset, paddingTop: stableTopInset }}
     >
       <ScrollView
         contentContainerStyle={{
           alignItems: "center",
           gap: 16,
-          paddingBottom: bottomPadding,
+          paddingBottom: bottomPadding + (hasBottomBar ? 132 : 0),
           paddingHorizontal: horizontalPadding,
           paddingTop: topPadding,
         }}
-        contentInsetAdjustmentBehavior="automatic"
+        contentInsetAdjustmentBehavior={process.env.EXPO_OS === "ios" ? "automatic" : "never"}
         keyboardShouldPersistTaps="handled"
         style={{ backgroundColor: colors.background, flex: 1 }}
       >
         <View style={{ gap: 16, maxWidth, width: "100%" }}>{children}</View>
       </ScrollView>
+      {bottomBar ? (
+        <View
+          style={{
+            backgroundColor: "transparent",
+            paddingBottom: process.env.EXPO_OS === "android" ? 12 : Math.max(insets.bottom, 12),
+            paddingHorizontal: 12,
+            paddingTop: 16,
+          }}
+        >
+          {bottomBar}
+        </View>
+      ) : null}
     </KeyboardAvoidingView>
+  );
+}
+
+function CheckInNavigationShell({
+  activeTab,
+  children,
+  isTabletLayout,
+  onTabChange,
+}: {
+  activeTab: CheckInTab;
+  children: React.ReactNode;
+  isTabletLayout: boolean;
+  onTabChange: (tab: CheckInTab) => void;
+}) {
+  if (!isTabletLayout) {
+    return <View style={{ gap: 16 }}>{children}</View>;
+  }
+
+  return (
+    <View style={{ alignItems: "flex-start", flexDirection: "row", gap: tabletRailGap }}>
+      <View
+        style={{
+          backgroundColor: "rgba(10, 16, 32, 0.96)",
+          borderColor: "rgba(255, 179, 182, 0.16)",
+          borderRadius: 28,
+          borderWidth: 1,
+          boxShadow: "0 18px 42px rgba(0, 0, 0, 0.30)",
+          gap: 8,
+          padding: 10,
+          width: tabletRailWidth,
+        }}
+      >
+        {checkInTabs.map((tab) => (
+          <CheckInTabButton
+            active={activeTab === tab.key}
+            icon={tab.icon}
+            key={tab.key}
+            label={tab.label}
+            layout="rail"
+            onPress={() => onTabChange(tab.key)}
+            prominent={tab.prominent}
+          />
+        ))}
+      </View>
+      <View style={{ flex: 1, gap: 16, minWidth: 0 }}>{children}</View>
+    </View>
+  );
+}
+
+function CheckInBottomNavigation({
+  activeTab,
+  onTabChange,
+}: {
+  activeTab: CheckInTab;
+  onTabChange: (tab: CheckInTab) => void;
+}) {
+  return (
+    <View
+      style={{
+        // NEW SLEEK PROFESSIONAL DESIGN - floating glass tab bar
+        alignItems: "stretch",
+        backgroundColor: "rgba(10, 16, 32, 0.98)",
+        borderColor: "rgba(255, 179, 182, 0.18)",
+        borderRadius: 32,
+        borderWidth: 1,
+        boxShadow: "0 18px 44px rgba(0, 0, 0, 0.36)",
+        flexDirection: "row",
+        gap: 4,
+        minHeight: 86,
+        paddingHorizontal: 8,
+        paddingVertical: 8,
+      }}
+    >
+      {checkInTabs.map((tab) => (
+        <CheckInTabButton
+          active={activeTab === tab.key}
+          icon={tab.icon}
+          key={tab.key}
+          label={tab.label}
+          layout="bottom"
+          onPress={() => onTabChange(tab.key)}
+          prominent={tab.prominent}
+        />
+      ))}
+    </View>
+  );
+}
+
+function CheckInTabButton({
+  active,
+  icon: Icon,
+  label,
+  layout,
+  onPress,
+  prominent,
+}: {
+  active: boolean;
+  icon: LucideIcon;
+  label: string;
+  layout: "bottom" | "rail";
+  onPress: () => void;
+  prominent?: boolean;
+}) {
+  const isRail = layout === "rail";
+  const isCenterAction = Boolean(prominent && !isRail);
+
+  if (isCenterAction) {
+    return (
+      <View style={{ alignItems: "center", flex: 1, justifyContent: "flex-start", minWidth: 0 }}>
+        <Pressable
+          accessibilityLabel={label}
+          accessibilityRole="button"
+          accessibilityState={{ selected: active }}
+          onPress={onPress}
+          style={({ pressed }) => ({
+            alignItems: "center",
+            backgroundColor: "rgba(5, 7, 12, 0.98)",
+            borderColor: active ? colors.accentSoft : "rgba(255, 179, 182, 0.35)",
+            borderRadius: 44,
+            borderWidth: 1,
+            boxShadow: active
+              ? "0 18px 38px rgba(229, 9, 19, 0.36)"
+              : "0 14px 30px rgba(229, 9, 19, 0.24)",
+            height: 86,
+            justifyContent: "center",
+            marginTop: -34,
+            transform: [{ scale: pressed ? 0.97 : 1 }],
+            width: 86,
+          })}
+        >
+          {({ pressed }) => (
+            <View
+              style={{
+                alignItems: "center",
+                backgroundColor: pressed ? colors.accentDark : colors.accent,
+                borderColor: "rgba(255, 255, 255, 0.16)",
+                borderRadius: 37,
+                borderWidth: 1,
+                height: 74,
+                justifyContent: "center",
+                overflow: "hidden",
+                width: 74,
+              }}
+            >
+              <View
+                pointerEvents="none"
+                style={{
+                  backgroundColor: "rgba(255, 255, 255, 0.18)",
+                  borderRadius: 999,
+                  height: 24,
+                  left: 14,
+                  position: "absolute",
+                  right: 14,
+                  top: 8,
+                }}
+              />
+              <Icon color={colors.text} size={31} strokeWidth={2.35} />
+            </View>
+          )}
+        </Pressable>
+        <Text
+          numberOfLines={1}
+          style={{
+            color: active ? colors.accentSoft : colors.muted,
+            fontSize: 11,
+            fontWeight: "900",
+            marginTop: 5,
+            textAlign: "center",
+            width: "100%",
+          }}
+        >
+          {label}
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        alignItems: "center",
+        backgroundColor: active ? "rgba(229, 9, 19, 0.14)" : pressed ? "rgba(255, 255, 255, 0.06)" : "transparent",
+        borderColor: active ? "rgba(255, 179, 182, 0.30)" : "transparent",
+        borderRadius: 22,
+        borderWidth: 1,
+        flex: isRail ? undefined : 1,
+        flexDirection: isRail ? "row" : "column",
+        gap: isRail ? 10 : 5,
+        justifyContent: "center",
+        minWidth: 0,
+        minHeight: isRail ? 58 : 68,
+        paddingHorizontal: isRail ? 12 : 4,
+      })}
+    >
+      <Icon color={active ? colors.accentSoft : colors.soft} size={isRail ? 20 : 22} strokeWidth={active ? 2.45 : 2} />
+      <Text
+        numberOfLines={1}
+        style={{
+          color: active ? colors.text : colors.muted,
+          fontSize: isRail ? 13 : 10,
+          fontWeight: "900",
+          textAlign: "center",
+          width: "100%",
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -1097,7 +1566,7 @@ function CenteredPanel({ children }: { children: React.ReactNode }) {
 
 function SignInHeader() {
   const { width } = useWindowDimensions();
-  const isWide = width >= 760;
+  const isWide = width >= tabletBreakpoint;
   const tileSize = isWide ? 140 : 118;
   const markSize = isWide ? 110 : 92;
 
@@ -1110,7 +1579,7 @@ function SignInHeader() {
           borderColor: `${colors.accent}66`,
           borderRadius: 30,
           borderWidth: 1,
-          boxShadow: "0 18px 38px rgba(45, 212, 191, 0.12)",
+          boxShadow: "0 18px 38px rgba(229, 9, 19, 0.16)",
           height: tileSize,
           justifyContent: "center",
           width: tileSize,
@@ -1236,24 +1705,39 @@ function ActionButton({
   );
 }
 
-function IconButton({ disabled, icon: Icon, onPress }: { disabled?: boolean; icon: LucideIcon; onPress: () => void }) {
+function IconButton({
+  accessibilityLabel,
+  active,
+  disabled,
+  icon: Icon,
+  onPress,
+}: {
+  accessibilityLabel: string;
+  active?: boolean;
+  disabled?: boolean;
+  icon: LucideIcon;
+  onPress: () => void;
+}) {
   return (
     <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled), selected: Boolean(active) }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => ({
         alignItems: "center",
-        backgroundColor: pressed ? colors.panelElevated : colors.panelAlt,
-        borderColor: colors.border,
-        borderRadius: 18,
+        backgroundColor: active ? colors.accent : pressed ? colors.panelElevated : colors.panelAlt,
+        borderColor: active ? colors.accent : colors.border,
+        borderRadius: 16,
         borderWidth: 1,
-        height: 56,
+        height: 48,
         justifyContent: "center",
         opacity: disabled ? 0.5 : 1,
-        width: 56,
+        width: 48,
       })}
     >
-      <Icon color={colors.soft} size={20} />
+      <Icon color={active ? colors.text : colors.soft} size={19} />
     </Pressable>
   );
 }
@@ -1330,60 +1814,62 @@ function RememberMeToggle({ active, onPress }: { active: boolean; onPress: () =>
 }
 
 function StaffTopBar({
+  accountActive,
   checkedInCount,
   isLoading,
   modeLabel,
+  onOpenAccount,
   onRefresh,
-  onSignOut,
   selectedEventTitle,
   selectedScopeLabel,
   totalCount,
 }: {
+  accountActive: boolean;
   checkedInCount: number;
   isLoading: boolean;
   modeLabel: string;
+  onOpenAccount: () => void;
   onRefresh: () => void;
-  onSignOut: () => void;
   selectedEventTitle: string;
   selectedScopeLabel: string;
   totalCount: number;
 }) {
   const { width } = useWindowDimensions();
-  const isWide = width >= 760;
+  const isWide = width >= tabletBreakpoint;
 
   return (
     <View
       style={{
-        alignItems: isWide ? "center" : "stretch",
+        alignItems: "center",
         backgroundColor: colors.panel,
         borderColor: colors.border,
         borderRadius: 26,
         borderWidth: 1,
         boxShadow: "0 18px 42px rgba(0, 0, 0, 0.28)",
-        flexDirection: isWide ? "row" : "column",
-        gap: 14,
+        flexDirection: "row",
+        gap: isWide ? 14 : 10,
         justifyContent: "space-between",
-        padding: isWide ? 18 : 16,
+        padding: isWide ? 18 : 14,
       }}
     >
-      <View style={{ alignItems: "center", flex: 1, flexDirection: "row", gap: 14, minWidth: 0 }}>
+      <View style={{ alignItems: "center", flex: 1, flexDirection: "row", gap: isWide ? 14 : 10, minWidth: 0 }}>
         <View
           style={{
             alignItems: "center",
             backgroundColor: colors.backgroundAlt,
             borderColor: `${colors.accent}66`,
-            borderRadius: 20,
+            borderRadius: isWide ? 20 : 17,
             borderWidth: 1,
-            height: 58,
+            height: isWide ? 58 : 48,
             justifyContent: "center",
-            width: 58,
+            width: isWide ? 58 : 48,
           }}
         >
           <Image
             accessibilityIgnoresInvertColors
             resizeMode="contain"
             source={require("../../assets/icon.png")}
-            style={{ height: 40, width: 40 }}
+            style={{ height: isWide ? 40 : 34, width: isWide ? 40 : 34 }}
           />
         </View>
         <View style={{ flex: 1, gap: 5, minWidth: 0 }}>
@@ -1401,11 +1887,77 @@ function StaffTopBar({
           </Text>
         </View>
       </View>
-      <View style={{ flexDirection: "row", gap: 10, justifyContent: isWide ? "flex-end" : "space-between" }}>
-        <IconButton disabled={isLoading} icon={RefreshCw} onPress={onRefresh} />
-        <IconButton disabled={isLoading} icon={LogOut} onPress={onSignOut} />
+      <View style={{ flexDirection: "row", gap: 8, justifyContent: "flex-end" }}>
+        <IconButton accessibilityLabel="Refresh attendees" disabled={isLoading} icon={RefreshCw} onPress={onRefresh} />
+        <IconButton
+          accessibilityLabel="Open scanner account"
+          active={accountActive}
+          icon={ShieldCheck}
+          onPress={onOpenAccount}
+        />
       </View>
     </View>
+  );
+}
+
+function NoEventsState({
+  isLoading,
+  message,
+  onRefresh,
+  onSignOut,
+}: {
+  isLoading: boolean;
+  message: string;
+  onRefresh: () => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <Panel title="No Events Assigned" icon={ShieldCheck}>
+      <View
+        style={{
+          alignItems: "center",
+          backgroundColor: colors.backgroundAlt,
+          borderColor: colors.border,
+          borderRadius: 24,
+          borderWidth: 1,
+          gap: 14,
+          minHeight: 280,
+          justifyContent: "center",
+          padding: 22,
+        }}
+      >
+        <View
+          style={{
+            alignItems: "center",
+            backgroundColor: `${colors.accent}18`,
+            borderColor: `${colors.accent}55`,
+            borderRadius: 30,
+            borderWidth: 1,
+            height: 64,
+            justifyContent: "center",
+            width: 64,
+          }}
+        >
+          <TicketCheck color={colors.accent} size={34} />
+        </View>
+        <View style={{ alignItems: "center", gap: 6 }}>
+          <Text selectable style={{ color: colors.text, fontSize: 23, fontWeight: "900", textAlign: "center" }}>
+            No check-in events yet
+          </Text>
+          <Text selectable style={{ color: colors.muted, fontSize: 15, lineHeight: 22, textAlign: "center" }}>
+            {message}
+          </Text>
+        </View>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "center", width: "100%" }}>
+          <View style={{ flexGrow: 1, minWidth: 180 }}>
+            <ActionButton disabled={isLoading} icon={RefreshCw} label={isLoading ? "Refreshing" : "Refresh Access"} onPress={onRefresh} />
+          </View>
+          <View style={{ flexGrow: 1, minWidth: 150 }}>
+            <ActionButton icon={LogOut} label="Sign Out" onPress={onSignOut} variant="secondary" />
+          </View>
+        </View>
+      </View>
+    </Panel>
   );
 }
 
@@ -1434,75 +1986,176 @@ function ScannerLaunchCard({
   selectedSession: SessionSummary | null;
   selectedScopeLabel: string;
 }) {
+  const scopeText = canCheckIn ? selectedScopeLabel : "Choose an event and day";
+  const detailText = `${selectedEventTitle} - ${selectedDayLabel}${selectedSession?.room ? ` - ${selectedSession.room}` : ""}`;
+
   return (
     <View
       style={{
-        backgroundColor: "#02040a",
-        borderColor: canCheckIn ? `${colors.accent}66` : `${colors.amber}55`,
-        borderRadius: 28,
+        // NEW SLEEK PROFESSIONAL DESIGN - attendee/staff camera-first scan surface
+        backgroundColor: "#050914",
+        borderColor: canCheckIn ? "rgba(255, 179, 182, 0.26)" : `${colors.amber}55`,
+        borderRadius: 32,
         borderWidth: 1,
+        boxShadow: "0 20px 48px rgba(0, 0, 0, 0.34)",
+        gap: 14,
         minHeight: cameraHeight,
         overflow: "hidden",
-        padding: 18,
+        padding: 16,
       }}
     >
-      <View
-        style={{
-          alignItems: "center",
-          borderColor: `${colors.soft}22`,
-          borderRadius: 24,
-          borderWidth: 1,
-          flex: 1,
-          gap: 16,
-          justifyContent: "center",
-          minHeight: cameraHeight - 36,
-          padding: 20,
-        }}
-      >
+      <View style={{ alignItems: "center", flexDirection: "row", gap: 10, justifyContent: "space-between" }}>
+        <View style={{ flex: 1, gap: 4, minWidth: 0 }}>
+          <Text numberOfLines={1} selectable style={{ color: colors.text, fontSize: 20, fontWeight: "900" }}>
+            {scopeText}
+          </Text>
+          <Text numberOfLines={1} selectable style={{ color: colors.muted, fontSize: 13, fontWeight: "700" }}>
+            {detailText}
+          </Text>
+        </View>
         <View
           style={{
             alignItems: "center",
-            backgroundColor: `${colors.accent}16`,
-            borderColor: `${colors.accent}55`,
-            borderRadius: 34,
+            backgroundColor: permissionGranted ? "rgba(229, 9, 19, 0.13)" : "rgba(251, 191, 36, 0.12)",
+            borderColor: permissionGranted ? "rgba(255, 179, 182, 0.28)" : "rgba(251, 191, 36, 0.26)",
+            borderRadius: 999,
             borderWidth: 1,
-            height: 68,
-            justifyContent: "center",
-            width: 68,
+            flexDirection: "row",
+            gap: 6,
+            minHeight: 34,
+            paddingHorizontal: 10,
           }}
         >
-          <Camera color={colors.accent} size={36} />
+          <View
+            style={{
+              backgroundColor: permissionGranted ? colors.accent : colors.amber,
+              borderRadius: 5,
+              height: 9,
+              width: 9,
+            }}
+          />
+          <Text style={{ color: permissionGranted ? colors.accentSoft : colors.amber, fontSize: 11, fontWeight: "900" }}>
+            {permissionGranted ? "Ready" : "Permission"}
+          </Text>
         </View>
-        <View style={{ alignItems: "center", gap: 6 }}>
-          <Text selectable style={{ color: colors.text, fontSize: 21, fontWeight: "900", textAlign: "center" }}>
-            {canCheckIn ? selectedScopeLabel : "Choose an event and day"}
-          </Text>
-          <Text selectable style={{ color: colors.muted, fontSize: 14, fontWeight: "700", lineHeight: 20, textAlign: "center" }}>
-            {selectedEventTitle} - {selectedDayLabel}
-            {selectedSession?.room ? ` - ${selectedSession.room}` : ""}
-          </Text>
+      </View>
+
+      <View
+        style={{
+          alignItems: "center",
+          backgroundColor: colors.background,
+          borderColor: "rgba(255, 179, 182, 0.16)",
+          borderRadius: 28,
+          borderWidth: 1,
+          flex: 1,
+          justifyContent: "center",
+          minHeight: cameraHeight - 92,
+          overflow: "hidden",
+          padding: 18,
+        }}
+      >
+          <View style={{ backgroundColor: "rgba(229, 9, 19, 0.10)", borderRadius: 999, height: 210, position: "absolute", right: -80, top: -92, width: 210 }} />
+        <View style={{ backgroundColor: "rgba(229, 9, 19, 0.12)", borderRadius: 999, bottom: -92, height: 220, left: -96, position: "absolute", width: 220 }} />
+        <View
+          style={{
+            alignItems: "center",
+            borderColor: "rgba(217, 228, 242, 0.14)",
+            borderRadius: 26,
+            borderWidth: 1,
+            gap: 16,
+            justifyContent: "center",
+            minHeight: cameraHeight - 132,
+            overflow: "hidden",
+            padding: 20,
+            width: "100%",
+          }}
+        >
+          <ScannerCorner top={14} left={14} />
+          <ScannerCorner top={14} right={14} rotate="90deg" />
+          <ScannerCorner bottom={14} right={14} rotate="180deg" />
+          <ScannerCorner bottom={14} left={14} rotate="270deg" />
+          <View
+            style={{
+              alignItems: "center",
+              backgroundColor: "rgba(229, 9, 19, 0.14)",
+              borderColor: "rgba(255, 179, 182, 0.36)",
+              borderRadius: 42,
+              borderWidth: 1,
+              boxShadow: "0 14px 30px rgba(229, 9, 19, 0.20)",
+              height: 84,
+              justifyContent: "center",
+              width: 84,
+            }}
+          >
+            <Camera color={colors.accentSoft} size={42} strokeWidth={2.2} />
+          </View>
+          <View style={{ alignItems: "center", gap: 7 }}>
+            <Text selectable style={{ color: colors.text, fontSize: 24, fontWeight: "900", textAlign: "center" }}>
+              Scan attendee QR
+            </Text>
+            <Text selectable style={{ color: colors.muted, fontSize: 14, fontWeight: "700", lineHeight: 20, textAlign: "center" }}>
+              Full-screen camera opens instantly and closes after a valid scan.
+            </Text>
+          </View>
+          <StatusPill label={selectedSession ? "Seminar check-in" : "Event gate check-in"} />
         </View>
-        <StatusPill label={selectedSession ? "Seminar check-in" : "Event gate check-in"} />
-        {cameraMessage ? (
-          <Text selectable style={{ color: colors.amber, fontSize: 13, fontWeight: "700", lineHeight: 18, textAlign: "center" }}>
-            {cameraMessage}
-          </Text>
-        ) : null}
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "center", width: "100%" }}>
-          <View style={{ flexGrow: 1, minWidth: 210 }}>
-            <ActionButton
-              disabled={isCheckingIn}
-              icon={Camera}
-              label={permissionGranted ? "Start Full-Screen Scanner" : "Allow Camera"}
-              onPress={onOpenScanner}
-            />
-          </View>
-          <View style={{ flexGrow: 1, minWidth: 160 }}>
-            <ActionButton icon={Keyboard} label="Manual Ticket" onPress={onManualTicket} variant="secondary" />
-          </View>
+      </View>
+
+      {cameraMessage ? (
+        <Text selectable style={{ color: colors.amber, fontSize: 13, fontWeight: "700", lineHeight: 18, textAlign: "center" }}>
+          {cameraMessage}
+        </Text>
+      ) : null}
+
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "center", width: "100%" }}>
+        <View style={{ flexGrow: 1, minWidth: 220 }}>
+          <ActionButton
+            disabled={isCheckingIn}
+            icon={Camera}
+            label={permissionGranted ? "Start Full-Screen Scanner" : "Allow Camera"}
+            onPress={onOpenScanner}
+          />
+        </View>
+        <View style={{ flexGrow: 1, minWidth: 160 }}>
+          <ActionButton icon={Keyboard} label="Manual Ticket" onPress={onManualTicket} variant="secondary" />
         </View>
       </View>
     </View>
+  );
+}
+
+function ScannerCorner({
+  bottom,
+  left,
+  right,
+  rotate = "0deg",
+  top,
+}: {
+  bottom?: number;
+  left?: number;
+  right?: number;
+  rotate?: string;
+  top?: number;
+}) {
+  return (
+    <View
+      pointerEvents="none"
+      style={{
+        borderColor: colors.accent,
+        borderLeftWidth: 3,
+        borderTopWidth: 3,
+        borderTopLeftRadius: 8,
+        bottom,
+        height: 34,
+        left,
+        opacity: 0.9,
+        position: "absolute",
+        right,
+        top,
+        transform: [{ rotate }],
+        width: 34,
+      }}
+    />
   );
 }
 
@@ -1611,8 +2264,8 @@ function PremiumResultCard({
         <View
           style={{
             alignItems: "center",
-            backgroundColor: `${colors.indigo}30`,
-            borderColor: `${colors.indigo}66`,
+            backgroundColor: `${colors.accent}20`,
+            borderColor: `${colors.accent}55`,
             borderRadius: 22,
             borderWidth: 1,
             height: 48,
@@ -1660,8 +2313,8 @@ function AttendeeStatsStrip({
         <View
           style={{
             alignItems: "center",
-            backgroundColor: `${colors.indigo}20`,
-            borderColor: `${colors.indigo}66`,
+            backgroundColor: `${colors.accent}14`,
+            borderColor: `${colors.accent}55`,
             borderRadius: 999,
             borderWidth: 1,
             flexDirection: "row",
@@ -1670,7 +2323,7 @@ function AttendeeStatsStrip({
             paddingHorizontal: 14,
           }}
         >
-          <Star color={colors.indigo} size={16} />
+          <Star color={colors.accent} size={16} />
           <Text style={{ color: colors.text, fontSize: 13, fontVariant: ["tabular-nums"], fontWeight: "900" }}>{checkInRate}% flow</Text>
         </View>
       </View>
@@ -1719,7 +2372,7 @@ function OptionRail({
                 {item.label}
               </Text>
               {item.detail ? (
-                <Text numberOfLines={1} style={{ color: active ? "#ccfbf1" : colors.muted, fontSize: 12, fontWeight: "700", marginTop: 5 }}>
+                <Text numberOfLines={1} style={{ color: active ? colors.accentSoft : colors.muted, fontSize: 12, fontWeight: "700", marginTop: 5 }}>
                   {item.detail}
                 </Text>
               ) : null}
@@ -1752,6 +2405,270 @@ function SummaryPill({ emphasis, label, value }: { emphasis?: boolean; label: st
       <Text numberOfLines={2} style={{ color: colors.text, fontSize: 15, fontWeight: "900", lineHeight: 19, marginTop: 4 }}>
         {value}
       </Text>
+    </View>
+  );
+}
+
+function EventOverviewSnapshot({
+  activeScopeId,
+  dayLabel,
+  isLoading,
+  items,
+  message,
+  onRefresh,
+  onSelectScope,
+}: {
+  activeScopeId: string;
+  dayLabel: string;
+  isLoading: boolean;
+  items: CheckInOverviewItem[];
+  message: string | null;
+  onRefresh: () => void;
+  onSelectScope: (scopeId: string) => void;
+}) {
+  const gateItem = items.find((item) => item.scope === "event") ?? null;
+  const seminarItems = items.filter((item) => item.scope === "session");
+  const seminarCheckedInCount = seminarItems.reduce((total, item) => total + item.checkedInCount, 0);
+  const seminarEligibleCount = seminarItems.reduce((total, item) => total + item.totalCount, 0);
+
+  return (
+    <View style={{ gap: 14 }}>
+      <View style={{ alignItems: "center", flexDirection: "row", gap: 12, justifyContent: "space-between" }}>
+        <View style={{ flex: 1, gap: 4, minWidth: 0 }}>
+          <Text selectable style={{ color: colors.text, fontSize: 21, fontWeight: "900" }}>
+            Current event count
+          </Text>
+          <Text numberOfLines={1} selectable style={{ color: colors.muted, fontSize: 13, fontWeight: "700" }}>
+            {dayLabel}
+          </Text>
+        </View>
+        <Pressable
+          accessibilityLabel="Refresh event overview"
+          accessibilityRole="button"
+          disabled={isLoading}
+          onPress={onRefresh}
+          style={({ pressed }) => ({
+            alignItems: "center",
+            backgroundColor: pressed ? colors.panelElevated : colors.panelAlt,
+            borderColor: colors.border,
+            borderRadius: 16,
+            borderWidth: 1,
+            height: 48,
+            justifyContent: "center",
+            opacity: isLoading ? 0.6 : 1,
+            width: 48,
+          })}
+        >
+          {isLoading ? <ActivityIndicator color={colors.accent} /> : <RefreshCw color={colors.soft} size={19} />}
+        </Pressable>
+      </View>
+
+      {message ? <StatusBanner tone="warning" text={message} /> : null}
+
+      {gateItem ? (
+        <Pressable
+          accessibilityLabel="Select event gate check-in"
+          accessibilityRole="button"
+          accessibilityState={{ selected: activeScopeId === gateItem.id }}
+          onPress={() => onSelectScope(gateItem.id)}
+          style={({ pressed }) => ({
+            backgroundColor: activeScopeId === gateItem.id ? `${colors.accent}18` : pressed ? colors.panelElevated : colors.backgroundAlt,
+            borderColor: activeScopeId === gateItem.id ? colors.accent : colors.border,
+            borderRadius: 24,
+            borderWidth: 1,
+            gap: 14,
+            padding: 16,
+          })}
+        >
+          <View style={{ alignItems: "center", flexDirection: "row", gap: 12 }}>
+            <View
+              style={{
+                alignItems: "center",
+                backgroundColor: `${colors.accent}20`,
+                borderColor: `${colors.accent}66`,
+                borderRadius: 22,
+                borderWidth: 1,
+                height: 50,
+                justifyContent: "center",
+                width: 50,
+              }}
+            >
+              <TicketCheck color={colors.accent} size={25} />
+            </View>
+            <View style={{ flex: 1, gap: 4, minWidth: 0 }}>
+              <Text numberOfLines={1} selectable style={{ color: colors.text, fontSize: 18, fontWeight: "900" }}>
+                Event gate
+              </Text>
+              <Text numberOfLines={1} selectable style={{ color: colors.muted, fontSize: 13, fontWeight: "700" }}>
+                {gateItem.detail}
+              </Text>
+            </View>
+            {activeScopeId === gateItem.id ? <StatusPill label="Active" /> : null}
+          </View>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+            <OverviewMetricTile detail={`of ${gateItem.totalCount}`} label="Checked in" value={String(gateItem.checkedInCount)} />
+            <OverviewMetricTile detail="not checked in" label="Waiting" value={String(gateItem.waitingCount)} />
+            <OverviewMetricTile detail="gate flow" label="Rate" value={`${gateItem.checkInRate}%`} />
+          </View>
+          <OverviewProgressBar rate={gateItem.checkInRate} />
+        </Pressable>
+      ) : (
+        <EmptyText text={isLoading ? "Loading event overview counts." : "Event overview counts are not loaded yet."} />
+      )}
+
+      <View style={{ gap: 10 }}>
+        <View style={{ alignItems: "center", flexDirection: "row", gap: 10, justifyContent: "space-between" }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text selectable style={{ color: colors.text, fontSize: 17, fontWeight: "900" }}>
+              Seminar check-in
+            </Text>
+            <Text selectable style={{ color: colors.muted, fontSize: 12, fontWeight: "800", marginTop: 3 }}>
+              {seminarItems.length ? `${seminarCheckedInCount}/${seminarEligibleCount} checked in across ${seminarItems.length} seminars` : "No seminars scheduled"}
+            </Text>
+          </View>
+        </View>
+        {seminarItems.length ? (
+          <View style={{ gap: 10 }}>
+            {seminarItems.map((item) => (
+              <SeminarOverviewRow
+                active={activeScopeId === item.id}
+                item={item}
+                key={item.id}
+                onPress={() => onSelectScope(item.id)}
+              />
+            ))}
+          </View>
+        ) : (
+          <EmptyText text={isLoading ? "Loading seminar counts." : "No seminars are configured for this event."} />
+        )}
+      </View>
+    </View>
+  );
+}
+
+function OverviewMetricTile({ detail, label, value }: { detail: string; label: string; value: string }) {
+  return (
+    <View
+      style={{
+        backgroundColor: colors.panel,
+        borderColor: colors.border,
+        borderRadius: 18,
+        borderWidth: 1,
+        flex: 1,
+        minWidth: 94,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+      }}
+    >
+      <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "900", textTransform: "uppercase" }}>
+        {label}
+      </Text>
+      <Text style={{ color: colors.text, fontSize: 24, fontVariant: ["tabular-nums"], fontWeight: "900", marginTop: 4 }}>
+        {value}
+      </Text>
+      <Text numberOfLines={1} style={{ color: colors.soft, fontSize: 12, fontWeight: "700", marginTop: 2 }}>
+        {detail}
+      </Text>
+    </View>
+  );
+}
+
+function SeminarOverviewRow({
+  active,
+  item,
+  onPress,
+}: {
+  active: boolean;
+  item: CheckInOverviewItem;
+  onPress: () => void;
+}) {
+  const timeLabel = item.startsAt && item.endsAt ? formatTimeRange(item.startsAt, item.endsAt) : null;
+
+  return (
+    <Pressable
+      accessibilityLabel={`Select ${item.label}`}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        backgroundColor: active ? `${colors.accent}16` : pressed ? colors.panelElevated : colors.panelAlt,
+        borderColor: active ? colors.accent : colors.border,
+        borderRadius: 20,
+        borderWidth: 1,
+        gap: 12,
+        padding: 14,
+      })}
+    >
+      <View style={{ alignItems: "flex-start", flexDirection: "row", gap: 12 }}>
+        <View
+          style={{
+            alignItems: "center",
+            backgroundColor: `${colors.accent}16`,
+            borderColor: `${colors.accent}44`,
+            borderRadius: 18,
+            borderWidth: 1,
+            height: 42,
+            justifyContent: "center",
+            width: 42,
+          }}
+        >
+          <Users color={colors.soft} size={21} />
+        </View>
+        <View style={{ flex: 1, gap: 5, minWidth: 0 }}>
+          <View style={{ alignItems: "center", flexDirection: "row", gap: 8 }}>
+            <Text numberOfLines={2} selectable style={{ color: colors.text, flex: 1, fontSize: 16, fontWeight: "900", lineHeight: 20 }}>
+              {item.label}
+            </Text>
+            {active ? <StatusPill label="Active" /> : null}
+          </View>
+          <Text numberOfLines={1} selectable style={{ color: colors.muted, fontSize: 12, fontWeight: "800" }}>
+            {item.detail}
+          </Text>
+          {timeLabel ? (
+            <View style={{ alignItems: "center", flexDirection: "row", gap: 6 }}>
+              <Clock3 color={colors.muted} size={14} />
+              <Text numberOfLines={1} selectable style={{ color: colors.soft, fontSize: 12, fontWeight: "800" }}>
+                {timeLabel}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+      <OverviewProgressBar rate={item.checkInRate} />
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        <CompactOverviewStat label="Checked in" value={`${item.checkedInCount}/${item.totalCount}`} />
+        <CompactOverviewStat label="Waiting" value={String(item.waitingCount)} />
+        <CompactOverviewStat label="Rate" value={`${item.checkInRate}%`} />
+        <CompactOverviewStat label="Access" value={item.requiresRegistration ? "Registered" : "Open"} />
+      </View>
+    </Pressable>
+  );
+}
+
+function OverviewProgressBar({ rate }: { rate: number }) {
+  return (
+    <View style={{ backgroundColor: colors.backgroundAlt, borderRadius: 999, height: 8, overflow: "hidden" }}>
+      <View style={{ backgroundColor: colors.accent, borderRadius: 999, height: 8, width: `${Math.min(Math.max(rate, 0), 100)}%` }} />
+    </View>
+  );
+}
+
+function CompactOverviewStat({ label, value }: { label: string; value: string }) {
+  return (
+    <View
+      style={{
+        backgroundColor: colors.backgroundAlt,
+        borderColor: colors.border,
+        borderRadius: 999,
+        borderWidth: 1,
+        flexDirection: "row",
+        gap: 7,
+        paddingHorizontal: 10,
+        paddingVertical: 7,
+      }}
+    >
+      <Text style={{ color: colors.muted, fontSize: 11, fontWeight: "900" }}>{label}</Text>
+      <Text style={{ color: colors.text, fontSize: 11, fontVariant: ["tabular-nums"], fontWeight: "900" }}>{value}</Text>
     </View>
   );
 }
@@ -1821,8 +2738,8 @@ function FilterButton({ active, label, onPress }: { active: boolean; label: stri
       onPress={onPress}
       style={({ pressed }) => ({
         alignItems: "center",
-        backgroundColor: active ? colors.indigo : pressed ? colors.panelElevated : colors.panelAlt,
-        borderColor: active ? colors.indigo : colors.border,
+        backgroundColor: active ? colors.accent : pressed ? colors.panelElevated : colors.panelAlt,
+        borderColor: active ? colors.accent : colors.border,
         borderRadius: 16,
         borderWidth: 1,
         flex: 1,
@@ -1984,6 +2901,48 @@ const inputStyle = {
   paddingHorizontal: 14,
 } as const;
 
+function createOverviewItem({
+  attendees,
+  detail,
+  endsAt,
+  id,
+  label,
+  requiresRegistration,
+  room,
+  scope,
+  startsAt,
+}: {
+  attendees: EventAttendeeSummary[];
+  detail: string;
+  endsAt?: string;
+  id: string;
+  label: string;
+  requiresRegistration?: boolean;
+  room?: string | null;
+  scope: CheckInOverviewItem["scope"];
+  startsAt?: string;
+}): CheckInOverviewItem {
+  const totalCount = attendees.length;
+  const checkedInCount = attendees.filter((attendee) => Boolean(attendee.checked_in_at)).length;
+  const waitingCount = Math.max(totalCount - checkedInCount, 0);
+  const checkInRate = totalCount ? Math.round((checkedInCount / totalCount) * 100) : 0;
+
+  return {
+    checkedInCount,
+    checkInRate,
+    detail,
+    endsAt,
+    id,
+    label,
+    requiresRegistration,
+    room,
+    scope,
+    startsAt,
+    totalCount,
+    waitingCount,
+  };
+}
+
 function extractTicketCode(rawValue: string) {
   const value = rawValue.trim();
   if (!value) return "";
@@ -2044,6 +3003,15 @@ function formatEventDate(value: string) {
     day: "numeric",
     month: "short",
   });
+}
+
+function formatTimeRange(startsAt: string, endsAt: string) {
+  const options = {
+    hour: "numeric",
+    minute: "2-digit",
+  } as const;
+
+  return `${new Date(startsAt).toLocaleTimeString(undefined, options)} - ${new Date(endsAt).toLocaleTimeString(undefined, options)}`;
 }
 
 function formatMoney(value: number, currency: string) {
